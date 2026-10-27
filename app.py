@@ -152,7 +152,7 @@ background: #8b0000;
 </head>
 <body>
 <main>
-    <h1>tr*sh@📁</h1>
+    <h1>tr*sh@</h1>
     <p>Upload ki gayi files yahan dekho aur download karo.</p>
 
     {% if message %}
