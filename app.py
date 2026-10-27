@@ -60,6 +60,33 @@ PAGE = """
     padding: 10px 18px;
     cursor: pointer;
 }
+h1, h2, h3 {
+    color: #c1121f;
+}
+
+input, select, textarea {
+    border: 1px solid #e5bfc3;
+    border-radius: 8px;
+    padding: 10px;
+}
+
+button:hover {
+    background: #a30e1a;
+    transform: translateY(-1px);
+}
+
+form, .card {
+    border-radius: 12px;
+}
+
+a {
+    color: #c1121f;
+    text-decoration: none;
+}
+
+a:hover {
+    color: #8b0000;
+}
     </style>
 </head>
 <body>
