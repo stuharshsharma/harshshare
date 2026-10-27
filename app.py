@@ -115,6 +115,39 @@ p {
     color: #555555;
     line-height: 1.6;
 }
+/* Premium Red and White Design */
+body {
+background: #fffafa;
+color: #222222;
+font-family: Arial, sans-serif;
+}
+
+main {
+max-width: 900px;
+margin: 30px auto;
+padding: 30px;
+background: #ffffff;
+border: 1px solid #f1d5d8;
+border-radius: 18px;
+box-shadow: 0 8px 30px rgba(180, 0, 30, 0.08);
+}
+
+h1, h2, h3 {
+color: #c1121f;
+}
+
+button {
+background: #c1121f;
+color: white;
+border: none;
+border-radius: 8px;
+padding: 10px 18px;
+cursor: pointer;
+}
+
+button:hover {
+background: #8b0000;
+}
     </style>
 </head>
 <body>
