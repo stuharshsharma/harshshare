@@ -87,6 +87,34 @@ a {
 a:hover {
     color: #8b0000;
 }
+body {
+    background: #fffafa;
+    color: #222222;
+    font-family: Arial, sans-serif;
+    margin: 0;
+    padding: 25px;
+}
+
+main {
+    max-width: 900px;
+    margin: 30px auto;
+    padding: 30px;
+    background: #ffffff;
+    border: 1px solid #f1d5d8;
+    border-radius: 18px;
+    box-shadow: 0 8px 30px rgba(180, 0, 30, 0.08);
+}
+
+h1 {
+    color: #c1121f;
+    text-align: center;
+    font-size: 36px;
+}
+
+p {
+    color: #555555;
+    line-height: 1.6;
+}
     </style>
 </head>
 <body>
