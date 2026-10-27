@@ -30,7 +30,7 @@ PAGE = """
             padding: 30px 15px;
         }
         main {
-            max-width: 700px;
+            max-width: 900px;
             margin: auto;
             background: white;
             padding: 25px;
