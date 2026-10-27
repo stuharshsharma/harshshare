@@ -20,7 +20,7 @@ PAGE = """
 <html>
 <head>
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>HarshShare</title>
+    <title>Tr*sh@</title>
     <style>
         body {
             font-family: Arial, sans-serif;
