@@ -39,7 +39,7 @@ PAGE = """
         h1 { color: #2563eb; }
         .file {
             padding: 14px;
-            border-bottom: 1px solid #ddd;
+            border-bottom: 1px solid #f1d5d8;
             overflow-wrap: anywhere;
         }
         a { color: #2563eb; }
