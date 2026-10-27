@@ -24,7 +24,8 @@ PAGE = """
     <style>
         body {
             font-family: Arial, sans-serif;
-            background: #f1f5f9;
+            background: #ffffff;
+            color: #222222;
             margin: 0;
             padding: 30px 15px;
         }
@@ -51,6 +52,14 @@ PAGE = """
             cursor: pointer;
         }
         input { margin: 10px 0; max-width: 100%; }
+        button {
+    background: #e60023;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 18px;
+    cursor: pointer;
+}
     </style>
 </head>
 <body>
