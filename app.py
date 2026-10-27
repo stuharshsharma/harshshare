@@ -183,7 +183,7 @@ background: #8b0000;
             {% endif %}
         </div>
     {% else %}
-        <p>Abhi koi file upload nahi hui.</p>
+        <p>Nothing here yet. something great is coming.</p>
     {% endfor %}
 </main>
 </body>
