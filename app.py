@@ -1,4 +1,4 @@
-from flask import Flask, request, render_template_string, send_from_directory, abort
+from flask import Flask, request, render_template_string, send_from_directory, abort, render_template
 from werkzeug.utils import secure_filename
 from pathlib import Path
 import os
@@ -193,6 +193,9 @@ background: #8b0000;
 from flask import session, redirect, url_for
 app.secret_key = os.environ.get("HARSHSHARE_SECRET_KEY", "")
 
+@app.route("/game")
+def boxing_game():
+    return render_template("game.html")
 @app.route("/")
 def home():
     files = sorted(p.name for p in UPLOAD_DIR.iterdir() if p.is_file())
