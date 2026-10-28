@@ -1,6 +1,6 @@
 from flask import (
-    Flask, request, render_template_string, abort, session, redirect,
-    url_for, flash
+Flask, request, render_template, render_template_string,
+abort, session, redirect, url_for, flash
 )
 from werkzeug.utils import secure_filename
 from imagekitio import ImageKit
