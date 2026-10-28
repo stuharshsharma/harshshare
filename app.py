@@ -62,7 +62,7 @@ PAGE = """
 </head>
 <body>
 <main>
-    <h1>HarshShare</h1>
+    <h1>Tr!5h@</h1>
     <p>Upload ki gayi files yahan dekho aur download karo.</p>
 
     {% with messages = get_flashed_messages() %}
