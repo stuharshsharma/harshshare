@@ -153,6 +153,44 @@ setInterval(computerTurn, 1000);
   ctx.fillRect(f.x - 24, 170, 12, 5);
   ctx.fillRect(f.x + 12, 170, 12, 5);
 
+  // Arms
+  ctx.fillStyle = "#fff";
+  const reach = f.punch > 0 ? 20 : 0;
+  ctx.fillRect(f.x + (facing * 18), 225, 20 + reach, 20);
+  ctx.fillRect(f.x - 38, 225, 20, 20);
+
+  // Name
+  ctx.fillStyle = "#222";
+  ctx.font = "bold 18px Arial";
+  ctx.textAlign = "center";
+  ctx.fillText(name, f.x, 330);
+
+  // Health bar
+  ctx.fillStyle = "#ddd";
+  ctx.fillRect(f.x - 45, 115, 90, 12);
+  ctx.fillStyle = f.hp > 30 ? "#20a050" : "#e53935";
+  ctx.fillRect(f.x - 45, 115, 90 * f.hp / 100, 12);
+
+  // HP text
+  ctx.fillStyle = "#fff";
+  ctx.font = "bold 13px Arial";
+  ctx.fillText("HP " + f.hp, f.x, 105);
+}
+  // Body
+  ctx.fillStyle = shirt;
+  ctx.fillRect(f.x - 28, 210, 56, 95);
+
+  // Head
+  ctx.fillStyle = "#e7b38c";
+  ctx.beginPath();
+  ctx.arc(f.x, 180, 30, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Eyes
+  ctx.fillStyle = "#222";
+  ctx.fillRect(f.x - 24, 170, 12, 5);
+  ctx.fillRect(f.x + 12, 170, 12, 5);
+
   // Gloves / arms
   const reach = f.punch > 0 ? 45 : 0;
   const armY = f.blocking ? 195 : 225;
