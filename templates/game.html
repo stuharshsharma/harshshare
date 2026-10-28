@@ -1,0 +1,180 @@
+<!DOCTYPE html><html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>HarshShare Boxing Arena</title>
+  <style>
+    body {
+      margin: 0;
+      background: #fff5f5;
+      color: #222;
+      font-family: Arial, sans-serif;
+      text-align: center;
+    }
+    header {
+      background: #b51224;
+      color: white;
+      padding: 16px;
+    }
+    canvas {
+      width: 95%;
+      max-width: 800px;
+      background: #f9dada;
+      border: 3px solid #b51224;
+      border-radius: 12px;
+      touch-action: none;
+    }
+    button {
+      padding: 14px 20px;
+      margin: 6px;
+      background: #b51224;
+      color: white;
+      border: 0;
+      border-radius: 10px;
+      font-size: 16px;
+      font-weight: bold;
+    }
+    .controls { margin: 12px auto; }
+    #status { font-weight: bold; padding: 10px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🥊 HarshShare Boxing Arena</h1>
+    <p>Funny Cartoon Boxing</p>
+  </header>  <h3 id="status">Ready? Start the fight!</h3><canvas id="ring" width="800" height="400"></canvas>
+
+  <div class="controls">
+    <button onclick="move(-1)">⬅️ Move</button>
+    <button onclick="punch()">👊 PUNCH</button>
+    <button onclick="block()">🛡️ BLOCK</button>
+    <button onclick="move(1)">Move ➡️</button>
+  </div><button onclick="startGame()">🔄 Start / Restart Fight</button>
+
+  <script>
+    const canvas = document.getElementById("ring");
+    const ctx = canvas.getContext("2d");
+    const statusText = document.getElementById("status");
+
+    let player = { x: 170, hp: 100, blocking: false, punch: 0 };
+    let rival = { x: 620, hp: 100, blocking: false, punch: 0 };
+    let running = false;
+    let lastHit = 0;
+
+    function startGame() {
+      player = { x: 170, hp: 100, blocking: false, punch: 0 };
+      rival = { x: 620, hp: 100, blocking: false, punch: 0 };
+      running = true;
+      statusText.textContent = "Fight shuru! 🥊";
+      draw();
+    }
+
+    function move(direction) {
+      if (!running) return;
+      player.x = Math.max(65, Math.min(360, player.x + direction * 25));
+      draw();
+    }
+
+    function punch() {
+      if (!running) return;
+      player.punch = 10;
+
+      if (Math.abs(player.x - rival.x) < 300) {
+        rival.hp = Math.max(0, rival.hp - 10);
+        statusText.textContent = "Dhishoom! 👊 Funny punch!";
+      } else {
+        statusText.textContent = "Thoda paas jao! 😂";
+      }
+
+      checkWinner();
+      draw();
+    }
+
+    function block() {
+      if (!running) return;
+      player.blocking = !player.blocking;
+      statusText.textContent = player.blocking
+        ? "Defence mode ON! 🛡️"
+        : "Defence mode OFF!";
+      draw();
+    }
+
+    function checkWinner() {
+      if (rival.hp <= 0 || player.hp <= 0) {
+        running = false;
+        statusText.textContent = rival.hp <= 0
+          ? "🏆 Tum jeet gaye!"
+          : "😂 Opponent jeet gaya!";
+      }
+    }
+
+    function drawFighter(f, name, shirt, facing) {
+      ctx.fillStyle = shirt;
+      ctx.fillRect(f.x - 28, 210, 56, 95);
+
+      ctx.fillStyle = "#e7b38c";
+      ctx.beginPath();
+      ctx.arc(f.x, 180, 30, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = "#222";
+      ctx.fillRect(f.x - 24, 170, 12, 5);
+      ctx.fillRect(f.x + 12, 170, 12, 5);
+
+      ctx.fillStyle = "#fff";
+      ctx.fillRect(f.x - 38, 225, 20, 20);
+      ctx.fillRect(f.x + 18, 225, 20, 20);
+
+      ctx.fillStyle = "#222";
+      ctx.font = "bold 18px Arial";
+      ctx.textAlign = "center";
+      ctx.fillText(name, f.x, 330);
+
+      ctx.fillStyle = "#ddd";
+      ctx.fillRect(f.x - 45, 115, 90, 12);
+      ctx.fillStyle = "#20a050";
+      ctx.fillRect(f.x - 45, 115, 90 * f.hp / 100, 12);
+
+      ctx.fillStyle = "#fff";
+      ctx.font = "bold 13px Arial";
+      ctx.fillText("HP " + f.hp, f.x, 105);
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = "#f4caca";
+      ctx.fillRect(0, 0, 800, 400);
+
+      ctx.strokeStyle = "#b51224";
+      ctx.lineWidth = 5;
+      [80, 130, 180].forEach(y => {
+        ctx.beginPath();
+        ctx.moveTo(20, y);
+        ctx.lineTo(780, y);
+        ctx.stroke();
+      });
+
+      ctx.fillStyle = "#b51224";
+      ctx.fillRect(0, 300, 800, 12);
+
+      drawFighter(player, "PLAYER 1", "#c62828", 1);
+      drawFighter(rival, "PLAYER 2", "#2455a4", -1);
+
+      if (!running && player.hp > 0 && rival.hp > 0) {
+        ctx.fillStyle = "#222";
+        ctx.font = "bold 26px Arial";
+        ctx.fillText("PRESS START TO FIGHT!", 400, 60);
+      }
+    }
+
+    // Simple keyboard controls
+    document.addEventListener("keydown", e => {
+      if (e.key === "ArrowLeft") move(-1);
+      if (e.key === "ArrowRight") move(1);
+      if (e.key === " " || e.key.toLowerCase() === "z") punch();
+      if (e.key.toLowerCase() === "x") block();
+    });
+
+    startGame();
+  </script></body>
+</html>
