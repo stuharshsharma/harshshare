@@ -1,294 +1,712 @@
-<!DOCTYPE html><html lang="en">
+<!DOCTYPE html>
+<html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>HarshShare Boxing Arena</title>
-  <style>
-    body {
-      margin: 0;
-      background: #fff5f5;
-      color: #222;
-      font-family: Arial, sans-serif;
-      text-align: center;
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Boxing Arena</title>
+
+<style>
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    background: #101018;
+    color: white;
+    font-family: Arial, sans-serif;
+    text-align: center;
+    overflow-x: hidden;
+}
+
+header {
+    padding: 15px 10px;
+    background: #191923;
+    border-bottom: 2px solid #e63946;
+}
+
+header h1 {
+    margin: 0;
+    color: #ff4050;
+    font-size: 28px;
+}
+
+header p {
+    margin: 6px 0 0;
+    color: #ccc;
+    font-size: 13px;
+}
+
+.game-container {
+    width: 100%;
+    max-width: 900px;
+    margin: 15px auto;
+    padding: 0 10px;
+}
+
+.hud {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 10px;
+}
+
+.fighter-info {
+    width: 44%;
+    text-align: left;
+}
+
+.fighter-info.enemy {
+    text-align: right;
+}
+
+.name {
+    font-size: 13px;
+    font-weight: bold;
+    margin-bottom: 5px;
+}
+
+.health-bg {
+    height: 16px;
+    background: #34343f;
+    border: 1px solid #777;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.health {
+    width: 100%;
+    height: 100%;
+    background: #35d07f;
+    transition: width 0.15s;
+}
+
+.enemy .health {
+    margin-left: auto;
+}
+
+.vs {
+    color: #ff4050;
+    font-weight: bold;
+    font-size: 20px;
+}
+
+canvas {
+    display: block;
+    width: 100%;
+    height: auto;
+    background: #242433;
+    border: 2px solid #e63946;
+    border-radius: 8px;
+    touch-action: none;
+}
+
+.message {
+    min-height: 25px;
+    margin: 12px 0;
+    color: #ffcf70;
+    font-weight: bold;
+}
+
+.controls {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    margin: 12px 0;
+}
+
+.control-group {
+    display: flex;
+    gap: 8px;
+}
+
+button {
+    border: none;
+    border-radius: 10px;
+    background: #292936;
+    color: white;
+    font-size: 17px;
+    font-weight: bold;
+    padding: 15px 18px;
+    min-width: 54px;
+    min-height: 52px;
+    cursor: pointer;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+button:active {
+    background: #e63946;
+    transform: scale(0.96);
+}
+
+.punch {
+    background: #e63946;
+}
+
+.restart {
+    background: #303040;
+    border: 1px solid #e63946;
+    padding: 10px 20px;
+    min-height: 42px;
+    font-size: 14px;
+}
+
+.instructions {
+    color: #bbb;
+    font-size: 13px;
+    line-height: 1.7;
+    margin: 15px 0 25px;
+}
+
+.back {
+    display: inline-block;
+    color: white;
+    text-decoration: none;
+    padding: 10px 18px;
+    background: #292936;
+    border-radius: 8px;
+    margin: 10px 0 20px;
+}
+
+@media (max-width: 500px) {
+    header h1 {
+        font-size: 24px;
     }
-    header {
-      background: #b51224;
-      color: white;
-      padding: 16px;
+
+    .game-container {
+        padding: 0 7px;
     }
-    canvas {
-      width: 95%;
-      max-width: 800px;
-      background: #f9dada;
-      border: 3px solid #b51224;
-      border-radius: 12px;
-      touch-action: none;
-    }
+
     button {
-      padding: 14px 20px;
-      margin: 6px;
-      background: #b51224;
-      color: white;
-      border: 0;
-      border-radius: 10px;
-      font-size: 16px;
-      font-weight: bold;
+        min-width: 47px;
+        min-height: 48px;
+        padding: 12px;
+        font-size: 15px;
     }
-    .controls { margin: 12px auto; }
-    #status { font-weight: bold; padding: 10px; }
-  </style>
+
+    .controls {
+        gap: 5px;
+    }
+
+    .control-group {
+        gap: 5px;
+    }
+}
+</style>
 </head>
+
 <body>
-  <header>
-    <h1>🥊 HarshShare Boxing Arena</h1>
-    <p>Funny Cartoon Boxing</p>
-  </header>  <h3 id="status">Ready? Start the fight!</h3><canvas id="ring" width="800" height="400"></canvas>
 
-  <div class="controls">
-    <button onclick="move(-1)">⬅️ Move</button>
-    <button onclick="punch()">👊 PUNCH</button>
-    <button onclick="block()">🛡️ BLOCK</button>
-    <button onclick="move(1)">Move ➡️</button>
-  </div><button onclick="startGame()">🔄 Start / Restart Fight</button>
+<header>
+    <h1>🥊 BOXING ARENA</h1>
+    <p>Enter the ring. Fight to win!</p>
+</header>
 
-  <script>
-    const canvas = document.getElementById("ring");
+<div class="game-container">
+
+    <div class="hud">
+        <div class="fighter-info">
+            <div class="name">YOU</div>
+            <div class="health-bg">
+                <div class="health" id="playerHealth"></div>
+            </div>
+        </div>
+
+        <div class="vs">VS</div>
+
+        <div class="fighter-info enemy">
+            <div class="name">OPPONENT</div>
+            <div class="health-bg">
+                <div class="health" id="enemyHealth"></div>
+            </div>
+        </div>
+    </div>
+
+    <canvas id="game" width="800" height="450"></canvas>
+
+    <div class="message" id="message">
+        Fight! Move and punch your opponent.
+    </div>
+
+    <div class="controls">
+        <div class="control-group">
+            <button id="left">◀</button>
+            <button id="right">▶</button>
+        </div>
+
+        <div class="control-group">
+            <button id="block">🛡️</button>
+            <button class="punch" id="punch">👊 PUNCH</button>
+        </div>
+    </div>
+
+    <button class="restart" id="restart">↻ RESTART FIGHT</button>
+
+    <div class="instructions">
+        <b>Mobile:</b> Use the buttons to move, block and punch.<br>
+        <b>PC:</b> A / D or arrow keys to move, Space to punch,
+        and S to block.
+    </div>
+
+    <a class="back" href="/">← Back to HarshShare</a>
+</div>
+
+<script>
+(() => {
+    const canvas = document.getElementById("game");
     const ctx = canvas.getContext("2d");
-    const statusText = document.getElementById("status");
 
-    let player = { x: 170, hp: 100, blocking: false, punch: 0 };
-    let rival = { x: 620, hp: 100, blocking: false, punch: 0 };
-    let running = false;
-    let lastHit = 0;
+    const playerBar = document.getElementById("playerHealth");
+    const enemyBar = document.getElementById("enemyHealth");
+    const message = document.getElementById("message");
 
-    function computerTurn() {
-  if (!running || !player || !rival) return;
+    const W = canvas.width;
+    const H = canvas.height;
+    const FLOOR = 355;
 
-  const distance = Math.abs(player.x - rival.x);
+    let player, enemy, keys, gameOver, frame, lastEnemyAttack;
+    let effects = [];
 
-  // Computer player ke paas aayega
-  if (distance > 145) {
-    rival.x += player.x < rival.x ? -20 : 20;
-    rival.x = Math.max(440, Math.min(735, rival.x));
-  } else {
-    // Computer punch marega
-    rival.punch = 10;
-
-    if (player.blocking) {
-      player.hp = Math.max(0, player.hp - 2);
-      statusText.textContent = "Computer ka punch block ho gaya! 🛡️";
-    } else {
-      player.hp = Math.max(0, player.hp - 8);
-      statusText.textContent = "Computer ne punch maar diya! 💥";
+    function makeFighter(x, color, glove, facing) {
+        return {
+            x,
+            y: FLOOR,
+            color,
+            glove,
+            facing,
+            health: 100,
+            punch: 0,
+            block: false,
+            hitFlash: 0,
+            cooldown: 0,
+            stun: 0
+        };
     }
 
-    checkWinner();
-  }
+    function resetGame() {
+        player = makeFighter(245, "#3985ff", "#ff4050", 1);
+        enemy = makeFighter(555, "#ffb52e", "#f5f5f5", -1);
 
-  draw();
-}
+        keys = {};
+        gameOver = false;
+        frame = 0;
+        lastEnemyAttack = 0;
+        effects = [];
 
-// Computer har 1 second mein apni baari lega
-setInterval(computerTurn, 1000);
-    function startGame() {
-      player = { x: 170, hp: 100, blocking: false, punch: 0 };
-      rival = { x: 620, hp: 100, blocking: false, punch: 0 };
-      running = true;
-      statusText.textContent = "Fight shuru! 🥊";
-      draw();
+        playerBar.style.width = "100%";
+        enemyBar.style.width = "100%";
+        message.textContent = "Fight! Move and punch your opponent.";
     }
 
-    function move(direction) {
-      if (!running) return;
-      player.x = Math.max(65, Math.min(360, player.x + direction * 25));
-      draw();
-    }
-
-    function punch() {
-      if (!running) return;
-      player.punch = 10;
-
-      if (Math.abs(player.x - rival.x) < 300) {
-        rival.hp = Math.max(0, rival.hp - 10);
-        statusText.textContent = "Dhishoom! 👊 Funny punch!";
-      } else {
-        statusText.textContent = "Thoda paas jao! 😂";
-      }
-
-      checkWinner();
-      draw();
-    }
-
-    function block() {
-      if (!running) return;
-      player.blocking = !player.blocking;
-      statusText.textContent = player.blocking
-        ? "Defence mode ON! 🛡️"
-        : "Defence mode OFF!";
-      draw();
-    }
-
-    function checkWinner() {
-      if (rival.hp <= 0 || player.hp <= 0) {
-        running = false;
-        statusText.textContent = rival.hp <= 0
-          ? "🏆 Tum jeet gaye!"
-          : "😂 Opponent jeet gaya!";
-      }
-    }
-
-    function drawFighter(f, name, shirt, facing) {
-  // Body
-  ctx.fillStyle = shirt;
-  ctx.fillRect(f.x - 28, 210, 56, 95);
-
-  // Head
-  ctx.fillStyle = "#e7b38c";
-  ctx.beginPath();
-  ctx.arc(f.x, 180, 30, 0, Math.PI * 2);
-  ctx.fill();
-
-  // Eyes
-  ctx.fillStyle = "#222";
-  ctx.fillRect(f.x - 24, 170, 12, 5);
-  ctx.fillRect(f.x + 12, 170, 12, 5);
-
-  // Arms
-  ctx.fillStyle = "#fff";
-  const reach = f.punch > 0 ? 20 : 0;
-  ctx.fillRect(f.x + (facing * 18), 225, 20 + reach, 20);
-  ctx.fillRect(f.x - 38, 225, 20, 20);
-
-  // Name
-  ctx.fillStyle = "#222";
-  ctx.font = "bold 18px Arial";
-  ctx.textAlign = "center";
-  ctx.fillText(name, f.x, 330);
-
-  // Health bar
-  ctx.fillStyle = "#ddd";
-  ctx.fillRect(f.x - 45, 115, 90, 12);
-  ctx.fillStyle = f.hp > 30 ? "#20a050" : "#e53935";
-  ctx.fillRect(f.x - 45, 115, 90 * f.hp / 100, 12);
-
-  // HP text
-  ctx.fillStyle = "#fff";
-  ctx.font = "bold 13px Arial";
-  ctx.fillText("HP " + f.hp, f.x, 105);
-}
-  // Body
-  ctx.fillStyle = shirt;
-  ctx.fillRect(f.x - 28, 210, 56, 95);
-
-  // Head
-  ctx.fillStyle = "#e7b38c";
-  ctx.beginPath();
-  ctx.arc(f.x, 180, 30, 0, Math.PI * 2);
-  ctx.fill();
-
-  // Eyes
-  ctx.fillStyle = "#222";
-  ctx.fillRect(f.x - 24, 170, 12, 5);
-  ctx.fillRect(f.x + 12, 170, 12, 5);
-
-  // Gloves / arms
-  const reach = f.punch > 0 ? 45 : 0;
-  const armY = f.blocking ? 195 : 225;
-
-  ctx.fillStyle = "#fff";
-  ctx.fillRect(
-    f.x + (facing * 18) - (facing < 0 ? reach : 0),
-    armY,
-    20 + reach,
-    20
-  );
-  ctx.fillRect(f.x - 38, f.blocking ? 195 : 225, 20, 20);
-
-  // Fighter name
-  ctx.fillStyle = "#222";
-  ctx.font = "bold 18px Arial";
-  ctx.textAlign = "center";
-  ctx.fillText(name, f.x, 330);
-
-  // Health bar background
-  ctx.fillStyle = "#ddd";
-  ctx.fillRect(f.x - 45, 115, 90, 12);
-
-  // Health bar
-  ctx.fillStyle = f.hp > 30 ? "#20a050" : "#e53935";
-  ctx.fillRect(f.x - 45, 115, 90 * f.hp / 100, 12);
-
-  // HP text
-  ctx.fillStyle = "#fff";
-  ctx.font = "bold 13px Arial";
-  ctx.fillText("HP " + f.hp, f.x, 105);
-}
-      ctx.fillStyle = shirt;
-      ctx.fillRect(f.x - 28, 210, 56, 95);
-
-      ctx.fillStyle = "#e7b38c";
-      ctx.beginPath();
-      ctx.arc(f.x, 180, 30, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.fillStyle = "#222";
-      ctx.fillRect(f.x - 24, 170, 12, 5);
-      ctx.fillRect(f.x + 12, 170, 12, 5);
-
-      ctx.fillStyle = "#fff";
-      ctx.fillRect(f.x - 38, 225, 20, 20);
-      ctx.fillRect(f.x + 18, 225, 20, 20);
-
-      ctx.fillStyle = "#222";
-      ctx.font = "bold 18px Arial";
-      ctx.textAlign = "center";
-      ctx.fillText(name, f.x, 330);
-
-      ctx.fillStyle = "#ddd";
-      ctx.fillRect(f.x - 45, 115, 90, 12);
-      ctx.fillStyle = "#20a050";
-      ctx.fillRect(f.x - 45, 115, 90 * f.hp / 100, 12);
-
-      ctx.fillStyle = "#fff";
-      ctx.font = "bold 13px Arial";
-      ctx.fillText("HP " + f.hp, f.x, 105);
-    }
-
-    function draw() {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = "#f4caca";
-      ctx.fillRect(0, 0, 800, 400);
-
-      ctx.strokeStyle = "#b51224";
-      ctx.lineWidth = 5;
-      [80, 130, 180].forEach(y => {
+    function roundedRect(x, y, w, h, r) {
         ctx.beginPath();
-        ctx.moveTo(20, y);
-        ctx.lineTo(780, y);
-        ctx.stroke();
-      });
-
-      ctx.fillStyle = "#b51224";
-      ctx.fillRect(0, 300, 800, 12);
-
-      drawFighter(player, "PLAYER 1", "#c62828", 1);
-      drawFighter(rival, "PLAYER 2", "#2455a4", -1);
-
-      if (!running && player.hp > 0 && rival.hp > 0) {
-        ctx.fillStyle = "#222";
-        ctx.font = "bold 26px Arial";
-        ctx.fillText("PRESS START TO FIGHT!", 400, 60);
-      }
+        ctx.roundRect(x, y, w, h, r);
     }
 
-    // Simple keyboard controls
-    document.addEventListener("keydown", e => {
-      if (e.key === "ArrowLeft") move(-1);
-      if (e.key === "ArrowRight") move(1);
-      if (e.key === " " || e.key.toLowerCase() === "z") punch();
-      if (e.key.toLowerCase() === "x") block();
+    function drawRing() {
+        const bg = ctx.createLinearGradient(0, 0, 0, H);
+        bg.addColorStop(0, "#242433");
+        bg.addColorStop(1, "#11111b");
+
+        ctx.fillStyle = bg;
+        ctx.fillRect(0, 0, W, H);
+
+        // Arena lights
+        ctx.fillStyle = "rgba(255,255,255,0.04)";
+        ctx.beginPath();
+        ctx.moveTo(90, 0);
+        ctx.lineTo(220, 0);
+        ctx.lineTo(390, FLOOR);
+        ctx.lineTo(200, FLOOR);
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.moveTo(610, 0);
+        ctx.lineTo(740, 0);
+        ctx.lineTo(600, FLOOR);
+        ctx.lineTo(410, FLOOR);
+        ctx.fill();
+
+        // Audience
+        for (let i = 0; i < 35; i++) {
+            const x = 12 + i * 23;
+            const y = 90 + Math.sin(i * 2) * 10;
+
+            ctx.fillStyle = i % 2 ? "#393949" : "#4a3548";
+            ctx.beginPath();
+            ctx.arc(x, y, 7, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        // Ring floor
+        ctx.fillStyle = "#343447";
+        ctx.fillRect(40, FLOOR, 720, 60);
+
+        ctx.strokeStyle = "#77778e";
+        ctx.lineWidth = 3;
+
+        [FLOOR, FLOOR + 17, FLOOR + 37].forEach(y => {
+            ctx.beginPath();
+            ctx.moveTo(35, y);
+            ctx.lineTo(765, y);
+            ctx.stroke();
+        });
+
+        // Ring posts
+        ctx.fillStyle = "#d9d9e5";
+        ctx.fillRect(35, FLOOR - 5, 10, 75);
+        ctx.fillRect(755, FLOOR - 5, 10, 75);
+
+        ctx.fillStyle = "#ff4050";
+        ctx.fillRect(35, FLOOR + 10, 10, 7);
+        ctx.fillRect(755, FLOOR + 10, 10, 7);
+    }
+
+    function drawFighter(f, isPlayer) {
+        ctx.save();
+        ctx.translate(f.x, f.y);
+
+        if (f.hitFlash > 0 && Math.floor(frame / 3) % 2 === 0) {
+            ctx.globalAlpha = 0.55;
+        }
+
+        const dir = f.facing;
+
+        // Shadow
+        ctx.fillStyle = "rgba(0,0,0,0.35)";
+        ctx.beginPath();
+        ctx.ellipse(0, 3, 38, 8, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Legs
+        ctx.strokeStyle = "#dedee8";
+        ctx.lineWidth = 13;
+        ctx.lineCap = "round";
+
+        ctx.beginPath();
+        ctx.moveTo(-9, -45);
+        ctx.lineTo(-16, -10);
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(10, -45);
+        ctx.lineTo(20, -10);
+        ctx.stroke();
+
+        // Shoes
+        ctx.strokeStyle = "#252530";
+        ctx.lineWidth = 12;
+
+        ctx.beginPath();
+        ctx.moveTo(-16, -10);
+        ctx.lineTo(-5, -8);
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(20, -10);
+        ctx.lineTo(30, -8);
+        ctx.stroke();
+
+        // Body
+        ctx.fillStyle = f.color;
+        roundedRect(-23, -108, 46, 67, 10);
+        ctx.fill();
+
+        // Shorts
+        ctx.fillStyle = "#20202b";
+        ctx.fillRect(-23, -52, 46, 17);
+
+        ctx.fillStyle = "#eeeeee";
+        ctx.fillRect(-3, -51, 6, 15);
+
+        // Neck
+        ctx.fillStyle = "#d69b76";
+        ctx.fillRect(-7, -119, 14, 15);
+
+        // Head
+        ctx.fillStyle = "#d69b76";
+        ctx.beginPath();
+        ctx.arc(0, -132, 21, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Hair / head guard
+        ctx.fillStyle = isPlayer ? "#182d55" : "#542525";
+        ctx.beginPath();
+        ctx.arc(0, -138, 21, Math.PI, Math.PI * 2);
+        ctx.fill();
+
+        // Eyes
+        ctx.fillStyle = "#171722";
+        ctx.beginPath();
+        ctx.arc(dir * 8, -133, 2.5, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Arms
+        ctx.lineWidth = 12;
+        ctx.strokeStyle = "#d69b76";
+
+        ctx.beginPath();
+        ctx.moveTo(-19, -98);
+        ctx.lineTo(-30, -76);
+        ctx.lineTo(-17, -65);
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(19, -98);
+
+        const reach = f.punch > 0 ? 38 : 0;
+        const armX = dir * (30 + reach);
+        const armY = f.punch > 0 ? -91 : (f.block ? -120 : -77);
+
+        ctx.lineTo(armX, armY);
+        ctx.stroke();
+
+        // Gloves
+        ctx.fillStyle = f.glove;
+
+        ctx.beginPath();
+        ctx.arc(-17, -65, 13, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.arc(armX, armY, 15, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Glove detail
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(armX - 7, armY - 3);
+        ctx.lineTo(armX + 7, armY - 3);
+        ctx.stroke();
+
+        if (f.block) {
+            ctx.strokeStyle = "#78c9ff";
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.arc(0, -100, 43, -2.2, 0.4);
+            ctx.stroke();
+        }
+
+        ctx.restore();
+    }
+
+    function addEffect(x, y, text) {
+        effects.push({
+            x,
+            y,
+            text,
+            life: 28
+        });
+    }
+
+    function drawEffects() {
+        effects.forEach(e => {
+            ctx.globalAlpha = Math.max(0, e.life / 28);
+            ctx.fillStyle = "#ffdf68";
+            ctx.font = "bold 24px Arial";
+            ctx.textAlign = "center";
+            ctx.fillText(e.text, e.x, e.y);
+            e.y -= 1;
+            e.life--;
+        });
+
+        effects = effects.filter(e => e.life > 0);
+        ctx.globalAlpha = 1;
+    }
+
+    function punch(attacker, defender, playerAttack) {
+        if (gameOver || attacker.cooldown > 0 || attacker.stun > 0) {
+            return;
+        }
+
+        attacker.punch = 9;
+        attacker.cooldown = 25;
+
+        const distance = Math.abs(attacker.x - defender.x);
+
+        if (distance < 105) {
+            if (defender.block) {
+                addEffect(defender.x, defender.y - 145, "BLOCK!");
+            } else {
+                defender.health = Math.max(0, defender.health - 10);
+                defender.hitFlash = 8;
+                defender.stun = 7;
+
+                addEffect(
+                    defender.x,
+                    defender.y - 160,
+                    "POW!"
+                );
+
+                if (playerAttack) {
+                    enemyBar.style.width = defender.health + "%";
+                } else {
+                    playerBar.style.width = defender.health + "%";
+                }
+            }
+        } else if (playerAttack) {
+            addEffect(attacker.x + 35, attacker.y - 155, "MISS!");
+        }
+
+        if (defender.health <= 0) {
+            gameOver = true;
+
+            message.textContent = playerAttack
+                ? "🏆 YOU WIN! Great fight!"
+                : "💥 YOU LOSE! Try again!";
+
+            addEffect(W / 2, 150, playerAttack ? "KNOCKOUT!" : "DEFEATED");
+        }
+    }
+
+    function update() {
+        if (gameOver) return;
+
+        frame++;
+
+        [player, enemy].forEach(f => {
+            if (f.punch > 0) f.punch--;
+            if (f.cooldown > 0) f.cooldown--;
+            if (f.hitFlash > 0) f.hitFlash--;
+            if (f.stun > 0) f.stun--;
+        });
+
+        player.block = !!keys.block;
+
+        if (player.stun === 0) {
+            if (keys.left) player.x -= 3;
+            if (keys.right) player.x += 3;
+        }
+
+        player.x = Math.max(80, Math.min(720, player.x));
+
+        // Opponent AI
+        const distance = Math.abs(enemy.x - player.x);
+
+        enemy.block = false;
+
+        if (enemy.stun === 0) {
+            if (distance > 80) {
+                enemy.x += player.x > enemy.x ? 1.5 : -1.5;
+            } else if (frame - lastEnemyAttack > 48) {
+                if (Math.random() < 0.22) {
+                    enemy.block = true;
+                } else {
+                    punch(enemy, player, false);
+                }
+
+                lastEnemyAttack = frame;
+            } else if (Math.random() < 0.012) {
+                enemy.block = true;
+            }
+        }
+
+        enemy.x = Math.max(80, Math.min(720, enemy.x));
+
+        player.facing = player.x < enemy.x ? 1 : -1;
+        enemy.facing = enemy.x < player.x ? 1 : -1;
+    }
+
+    function render() {
+        drawRing();
+
+        // Draw enemy first
+        drawFighter(enemy, false);
+        drawFighter(player, true);
+
+        drawEffects();
+    }
+
+    function loop() {
+        update();
+        render();
+        requestAnimationFrame(loop);
+    }
+
+    function bindHold(id, key) {
+        const button = document.getElementById(id);
+
+        button.addEventListener("pointerdown", e => {
+            e.preventDefault();
+            keys[key] = true;
+
+            if (button.setPointerCapture) {
+                try {
+                    button.setPointerCapture(e.pointerId);
+                } catch (_) {}
+            }
+        });
+
+        ["pointerup", "pointercancel", "lostpointercapture"].forEach(event => {
+            button.addEventListener(event, () => {
+                keys[key] = false;
+            });
+        });
+    }
+
+    bindHold("left", "left");
+    bindHold("right", "right");
+    bindHold("block", "block");
+
+    document.getElementById("punch").addEventListener("pointerdown", e => {
+        e.preventDefault();
+        punch(player, enemy, true);
     });
 
-    startGame();
-  </script></body>
+    document.getElementById("restart").addEventListener("click", resetGame);
+
+    document.addEventListener("keydown", e => {
+        if ([
+            "ArrowLeft", "ArrowRight", "ArrowUp",
+            "ArrowDown", " "
+        ].includes(e.key)) {
+            e.preventDefault();
+        }
+
+        if (e.key === "ArrowLeft" || e.key.toLowerCase() === "a") {
+            keys.left = true;
+        }
+
+        if (e.key === "ArrowRight" || e.key.toLowerCase() === "d") {
+            keys.right = true;
+        }
+
+        if (e.key.toLowerCase() === "s") {
+            keys.block = true;
+        }
+
+        if (e.code === "Space" && !e.repeat) {
+            punch(player, enemy, true);
+        }
+    });
+
+    document.addEventListener("keyup", e => {
+        if (e.key === "ArrowLeft" || e.key.toLowerCase() === "a") {
+            keys.left = false;
+        }
+
+        if (e.key === "ArrowRight" || e.key.toLowerCase() === "d") {
+            keys.right = false;
+        }
+
+        if (e.key.toLowerCase() === "s") {
+            keys.block = false;
+        }
+    });
+
+    window.addEventListener("blur", () => {
+        if (keys) keys = {};
+    });
+
+    resetGame();
+    loop();
+})();
+</script>
+
+</body>
 </html>
