@@ -61,6 +61,35 @@
     let running = false;
     let lastHit = 0;
 
+    function computerTurn() {
+  if (!running || !player || !rival) return;
+
+  const distance = Math.abs(player.x - rival.x);
+
+  // Computer player ke paas aayega
+  if (distance > 145) {
+    rival.x += player.x < rival.x ? -20 : 20;
+    rival.x = Math.max(440, Math.min(735, rival.x));
+  } else {
+    // Computer punch marega
+    rival.punch = 10;
+
+    if (player.blocking) {
+      player.hp = Math.max(0, player.hp - 2);
+      statusText.textContent = "Computer ka punch block ho gaya! 🛡️";
+    } else {
+      player.hp = Math.max(0, player.hp - 8);
+      statusText.textContent = "Computer ne punch maar diya! 💥";
+    }
+
+    checkWinner();
+  }
+
+  draw();
+}
+
+// Computer har 1 second mein apni baari lega
+setInterval(computerTurn, 1000);
     function startGame() {
       player = { x: 170, hp: 100, blocking: false, punch: 0 };
       rival = { x: 620, hp: 100, blocking: false, punch: 0 };
