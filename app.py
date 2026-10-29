@@ -1,1042 +1,799 @@
+import os
+import re
+import hmac
+import uuid
+import secrets
+import sqlite3
+import mimetypes
+from pathlib import Path
+from datetime import datetime, timezone
+from functools import wraps
+
 from flask import (
-    Flask, request, render_template_string, abort, session, redirect,
-    url_for, flash
+    Flask, request, session, redirect, url_for,
+    render_template_string, abort, send_from_directory,
+    flash
 )
 from werkzeug.utils import secure_filename
-from imagekitio import ImageKit
-import os
-import hmac
-import logging
+from werkzeug.security import check_password_hash, generate_password_hash
+
+
+# =====================================================
+# HARSHSHARE - CONFIGURATION
+# =====================================================
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("HARSHSHARE_SECRET_KEY", "")
 
-IMAGEKIT_PRIVATE_KEY = os.environ.get("IMAGEKIT_PRIVATE_KEY", "")
-IMAGEKIT_URL_ENDPOINT = os.environ.get("IMAGEKIT_URL_ENDPOINT", "").rstrip("/")
-IMAGEKIT_FOLDER = "/harshshare"
+BASE_DIR = Path(__file__).resolve().parent
+UPLOAD_DIR = BASE_DIR / "harshshare_files"
+DATABASE = BASE_DIR / "harshshare.db"
 
-imagekit = ImageKit(private_key=IMAGEKIT_PRIVATE_KEY) if IMAGEKIT_PRIVATE_KEY else None
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-app.config["MAX_CONTENT_LENGTH"] = 100 * 1024 * 1024
-ADMIN_PASSWORD = os.environ.get("HARSHSHARE_ADMIN_PASSWORD", "")
+app.secret_key = os.environ.get("SECRET_KEY", "")
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Set SECRET_KEY in your hosting environment.
+# Never deploy with an empty or publicly known key.
+if not app.secret_key:
+    if os.environ.get("RENDER"):
+        raise RuntimeError("Set SECRET_KEY in Render environment variables.")
+    app.secret_key = secrets.token_hex(32)
+    print("WARNING: Temporary development SECRET_KEY generated.")
 
-PAGE = """
+OWNER_USERNAME = "Tr!5h@"
+
+# Set ADMIN_PASSWORD_HASH to a Werkzeug password hash.
+# Generate one using:
+# python -c "from werkzeug.security import generate_password_hash; print(generate_password_hash('YourStrongPassword'))"
+ADMIN_PASSWORD_HASH = os.environ.get("ADMIN_PASSWORD_HASH", "")
+
+MAX_UPLOAD_MB = int(os.environ.get("MAX_UPLOAD_MB", "50"))
+app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_MB * 1024 * 1024
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_SECURE"] = (
+    os.environ.get("COOKIE_SECURE", "1") == "1"
+)
+
+# Add extensions here if you want to restrict file types.
+ALLOWED_EXTENSIONS = None
+
+# This standalone version uses local disk storage.
+# Persistent storage must be configured separately on your host.
+
+
+# =====================================================
+# DATABASE
+# =====================================================
+
+def db():
+    conn = sqlite3.connect(DATABASE)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def init_db():
+    with db() as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS files (
+                id TEXT PRIMARY KEY,
+                filename TEXT NOT NULL,
+                stored_name TEXT NOT NULL,
+                size INTEGER NOT NULL,
+                mime_type TEXT,
+                uploaded_at TEXT NOT NULL,
+                deleted_at TEXT,
+                share_token TEXT UNIQUE
+            )
+        """)
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                action TEXT NOT NULL,
+                file_id TEXT,
+                created_at TEXT NOT NULL
+            )
+        """)
+
+
+def log_event(action, file_id=None):
+    with db() as conn:
+        conn.execute(
+            """
+            INSERT INTO events (action, file_id, created_at)
+            VALUES (?, ?, ?)
+            """,
+            (
+                action,
+                file_id,
+                datetime.now(timezone.utc).isoformat()
+            )
+        )
+
+
+init_db()
+
+
+# =====================================================
+# SECURITY HELPERS
+# =====================================================
+
+def owner_required(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not session.get("is_owner"):
+            return redirect(url_for("login", next=request.path))
+        return fn(*args, **kwargs)
+    return wrapper
+
+
+def csrf_token():
+    if "csrf_token" not in session:
+        session["csrf_token"] = secrets.token_urlsafe(32)
+    return session["csrf_token"]
+
+
+app.jinja_env.globals["csrf_token"] = csrf_token
+
+
+@app.before_request
+def protect_post_requests():
+    if request.method == "POST":
+        expected = session.get("csrf_token", "")
+        received = request.form.get("csrf_token", "")
+
+        if not expected or not hmac.compare_digest(expected, received):
+            abort(400, description="Invalid security token. Refresh and retry.")
+
+
+def allowed_file(filename):
+    if not filename or filename in {".", ".."}:
+        return False
+
+    if ALLOWED_EXTENSIONS is None:
+        return True
+
+    extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    return extension in ALLOWED_EXTENSIONS
+
+
+def get_file(file_id, include_deleted=False):
+    with db() as conn:
+        if include_deleted:
+            row = conn.execute(
+                "SELECT * FROM files WHERE id = ?",
+                (file_id,)
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT * FROM files WHERE id = ? AND deleted_at IS NULL",
+                (file_id,)
+            ).fetchone()
+
+    return row
+
+
+def format_size(size):
+    size = float(size)
+
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if size < 1024 or unit == "TB":
+            return f"{size:.1f} {unit}"
+        size /= 1024
+
+    return "0 B"
+
+
+app.jinja_env.filters["filesize"] = format_size
+
+
+# =====================================================
+# COMMON DESIGN
+# =====================================================
+
+PAGE = r"""
 <!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Tr!5h@ | Share • Play • Grow</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ title }} · HarshShare</title>
 
 <style>
 :root {
- --red:#d10d1b;
- --deep:#8f0610;
- --ink:#17202b;
- --muted:#647184;
- --card:#fff;
- --line:#f1dadd;
- --shadow:0 10px 28px rgba(120,0,15,.09);
+    --red: #c51f3a;
+    --red-dark: #94142a;
+    --pink: #fff0f2;
+    --border: #f1d5d8;
+    --text: #292329;
+    --muted: #77717a;
+    --white: #ffffff;
+    --bg: #fffafb;
+    --shadow: 0 12px 35px rgba(120, 20, 45, .07);
 }
 
-* {box-sizing:border-box}
-html {scroll-behavior:smooth}
+* { box-sizing: border-box; }
 
 body {
- margin:0;
- background:linear-gradient(135deg,#fff,#fff6f7,#fff);
- color:var(--ink);
- font-family:Arial,sans-serif;
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: Inter, system-ui, -apple-system, sans-serif;
 }
 
-a {color:inherit;text-decoration:none}
-button,input,select {font:inherit}
+a { color: var(--red); text-decoration: none; }
+
+button, input, select {
+    font: inherit;
+}
 
 .topbar {
- position:sticky;
- top:0;
- z-index:10;
- display:flex;
- align-items:center;
- justify-content:space-between;
- gap:18px;
- padding:14px 4%;
- background:#ffffffed;
- border-bottom:1px solid var(--line);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 17px 5%;
+    background: rgba(255,255,255,.95);
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    z-index: 5;
 }
 
 .brand {
- font-size:30px;
- font-weight:900;
- font-style:italic;
- letter-spacing:-1.5px;
+    font-size: 23px;
+    font-weight: 900;
+    letter-spacing: -1px;
 }
 
-.brand span {color:var(--red)}
+.brand span { color: var(--red); }
 
 .nav {
- display:flex;
- gap:8px;
- flex-wrap:wrap;
- align-items:center;
+    display: flex;
+    gap: 15px;
+    flex-wrap: wrap;
+    align-items: center;
 }
 
-.nav a,.nav button {
- border:0;
- background:transparent;
- border-radius:12px;
- padding:11px;
- cursor:pointer;
+.nav a {
+    font-size: 13px;
+    font-weight: 750;
 }
 
-.nav a:hover,.nav button:hover {
- background:#fff0f1;
- color:var(--red);
+.container {
+    width: min(1150px, 92%);
+    margin: 32px auto 60px;
 }
 
-.login {
- border:1px solid var(--red)!important;
- color:var(--red)!important;
+.hero {
+    background: linear-gradient(135deg, #fff, #fff0f3);
+    border: 1px solid var(--border);
+    border-radius: 25px;
+    padding: 30px;
+    box-shadow: var(--shadow);
+    margin-bottom: 24px;
 }
-
-.wrap {
- max-width:1440px;
- margin:auto;
- padding:26px 20px 0;
-}
-
-.welcome {
- display:grid;
- grid-template-columns:1fr 1fr;
- gap:20px;
- align-items:stretch;
-}
-
-.intro {padding:22px 10px}
 
 .eyebrow {
- color:var(--red);
- font-size:12px;
- font-weight:800;
- letter-spacing:3px;
+    color: var(--red);
+    font-size: 12px;
+    letter-spacing: 2px;
+    font-weight: 900;
 }
 
-.intro h1 {
- font-size:clamp(38px,5vw,70px);
- line-height:1;
- margin:12px 0;
+h1 {
+    font-size: clamp(28px, 5vw, 42px);
+    letter-spacing: -1.5px;
+    margin: 12px 0;
 }
 
-.intro h1 span {color:var(--red)}
+.muted { color: var(--muted); }
 
-.intro p {
- color:var(--muted);
- line-height:1.7;
+.owner {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    margin-top: 8px;
 }
 
-.pills {
- display:flex;
- gap:10px;
- flex-wrap:wrap;
- margin-top:20px;
+.crown {
+    font-size: 32px;
+    filter: drop-shadow(0 4px 6px #dca9b0);
 }
 
-.pill {
- background:#fff;
- border:1px solid var(--line);
- border-radius:30px;
- padding:9px 13px;
- font-size:13px;
+.owner-name {
+    font-size: 21px;
+    font-weight: 900;
+    color: var(--red-dark);
 }
 
-.arena {
- min-height:250px;
- border-radius:22px;
- padding:28px;
- color:white;
- background:radial-gradient(ellipse at top,#ff515b,#51030a 55%,#09090c);
- display:flex;
- flex-direction:column;
- align-items:center;
- justify-content:center;
- text-align:center;
+.badge {
+    display: inline-block;
+    background: var(--red);
+    color: white;
+    border-radius: 30px;
+    padding: 5px 12px;
+    font-size: 10px;
+    letter-spacing: 1.5px;
+    font-weight: 900;
 }
 
-.arena h2 {
- font-size:clamp(30px,4vw,48px);
- margin:12px 0;
- text-transform:uppercase;
- font-style:italic;
+.grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 15px;
+    margin-bottom: 25px;
 }
 
-.arena p {color:#f6dfe1}
-
-.btn {
- display:inline-flex;
- align-items:center;
- justify-content:center;
- background:linear-gradient(135deg,#f51b2b,#a4000c);
- color:white;
- border:0;
- border-radius:12px;
- padding:13px 20px;
- font-weight:bold;
- cursor:pointer;
+.card {
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    padding: 20px;
+    box-shadow: var(--shadow);
+    min-width: 0;
 }
 
-.btn:hover {filter:brightness(1.1)}
+.stat-label {
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.stat-value {
+    font-size: 27px;
+    font-weight: 900;
+    margin-top: 8px;
+    overflow-wrap: anywhere;
+}
 
 .section-title {
- display:flex;
- justify-content:space-between;
- align-items:end;
- margin:28px 0 14px;
+    font-size: 20px;
+    font-weight: 900;
+    margin: 25px 0 15px;
 }
 
-.section-title h2 {margin:0}
-
-.stats {
- display:grid;
- grid-template-columns:repeat(4,1fr);
- gap:13px;
- margin-top:22px;
+.toolbar {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
 }
 
-.stat,.panel,.quick {
- background:var(--card);
- border:1px solid var(--line);
- border-radius:17px;
- box-shadow:var(--shadow);
+input, select {
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: 11px;
+    padding: 12px;
+    color: var(--text);
+    min-width: 0;
 }
 
-.stat {padding:16px}
-.stat .icon {font-size:22px}
-.stat strong {
- display:block;
- font-size:25px;
- margin:8px 0 3px;
+input:focus, select:focus {
+    outline: 2px solid #f5c5cd;
+    border-color: var(--red);
 }
 
-.stat small,.muted {color:var(--muted)}
+.search { flex: 1; min-width: 160px; }
 
-.main-grid {
- display:grid;
- grid-template-columns:1.1fr .9fr;
- gap:18px;
- margin-top:22px;
+.btn {
+    border: 0;
+    display: inline-flex;
+    justify-content: center;
+    align-items: center;
+    gap: 7px;
+    background: var(--red);
+    color: white;
+    padding: 11px 15px;
+    border-radius: 11px;
+    font-weight: 800;
+    cursor: pointer;
 }
 
-.panel {
- padding:20px;
- min-width:0;
+.btn:hover { background: var(--red-dark); }
+
+.btn.secondary {
+    color: var(--red);
+    background: var(--pink);
+    border: 1px solid var(--border);
 }
 
-.panel h2 {margin-top:0}
+.btn.danger { background: #7e1527; }
 
-.uploadbox {
- margin-top:16px;
- border:1px dashed #e5aab0;
- border-radius:14px;
- padding:17px;
- background:#fffafb;
+.file-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    border-bottom: 1px solid #f4e8e9;
+    padding: 17px 0;
 }
 
-.uploadbox input[type=file] {
- max-width:100%;
- margin-bottom:12px;
+.file-row:last-child { border-bottom: 0; }
+
+.file-name {
+    font-weight: 850;
+    overflow-wrap: anywhere;
 }
 
-.searchrow {
- display:flex;
- gap:9px;
- margin:16px 0 12px;
- flex-wrap:wrap;
+.file-meta {
+    color: var(--muted);
+    font-size: 12px;
+    margin-top: 5px;
 }
 
-.searchrow input {
- flex:1;
- min-width:150px;
- border:1px solid var(--line);
- border-radius:10px;
- padding:11px;
+.actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
 }
 
-.searchrow select {
- border:1px solid var(--line);
- border-radius:10px;
- padding:11px;
+.actions .btn {
+    padding: 8px 10px;
+    font-size: 12px;
 }
 
-.filelist {
- max-height:360px;
- overflow:auto;
+.flash {
+    background: var(--pink);
+    border: 1px solid var(--border);
+    color: var(--red-dark);
+    padding: 13px;
+    border-radius: 12px;
+    margin-bottom: 15px;
 }
 
-.file {
- display:flex;
- align-items:center;
- gap:12px;
- padding:13px 0;
- border-bottom:1px solid #f5e7e9;
+.upload-box {
+    border: 2px dashed #e9b9c1;
+    border-radius: 18px;
+    padding: 20px;
+    background: #fffafb;
 }
 
-.fileicon {
- width:40px;
- height:40px;
- display:grid;
- place-items:center;
- border-radius:12px;
- background:#fff0f1;
- font-size:20px;
- flex-shrink:0;
+footer {
+    text-align: center;
+    color: var(--muted);
+    padding: 25px;
+    font-size: 12px;
 }
 
-.filename {
- font-weight:bold;
- overflow-wrap:anywhere;
+@media (max-width: 800px) {
+    .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .topbar { padding: 14px 4%; }
+    .hero { padding: 22px; }
 }
 
-.filemeta {
- color:var(--muted);
- font-size:12px;
- margin-top:4px;
-}
-
-.fileactions {
- margin-left:auto;
- display:flex;
- gap:7px;
- align-items:center;
-}
-
-.smallbtn {
- border:1px solid var(--line);
- border-radius:9px;
- background:#fff;
- padding:8px 10px;
- color:var(--red);
- cursor:pointer;
-}
-
-.delete-form {display:inline}
-
-.quickgrid {
- display:grid;
- grid-template-columns:repeat(4,1fr);
- gap:13px;
-}
-
-.quick {
- padding:17px;
- transition:.18s;
-}
-
-.quick:hover {
- transform:translateY(-3px);
- border-color:#e8a3aa;
-}
-
-.qicon {font-size:24px}
-.quick strong {
- display:block;
- margin:9px 0 5px;
-}
-
-.quick small {
- color:var(--muted);
- line-height:1.5;
-}
-
-.notice {
- padding:12px 14px;
- border-radius:12px;
- background:#fff0f1;
- color:#8f0610;
- margin:12px 0;
-}
-
-.empty {
- padding:24px 8px;
- color:var(--muted);
- text-align:center;
-}
-
-.footer {
- margin-top:34px;
- background:linear-gradient(120deg,#160307,#350008);
- border-top:4px solid #e90d22;
- color:white;
- padding:24px 4%;
- display:flex;
- justify-content:space-between;
- align-items:center;
- gap:16px;
- flex-wrap:wrap;
-}
-
-.footer small {color:#eacdd0}
-
-.dark {
- --ink:#f4f4f5;
- --muted:#b7bbc5;
- --card:#19191f;
- --line:#383039;
- background:#101014;
- color:var(--ink);
-}
-
-.dark .topbar {background:#15151bee}
-.dark .stat,.dark .panel,.dark .quick {background:#19191f}
-.dark .searchrow input,.dark .searchrow select,
-.dark .smallbtn,.dark .uploadbox {
- background:#202027;
- color:#eee;
- border-color:#383039;
-}
-
-@media(max-width:900px) {
- .welcome,.main-grid {grid-template-columns:1fr}
- .stats {grid-template-columns:repeat(2,1fr)}
- .quickgrid {grid-template-columns:repeat(2,1fr)}
-}
-
-@media(max-width:520px) {
- .topbar {align-items:flex-start;flex-direction:column}
- .nav {width:100%;gap:3px}
- .nav a,.nav button {padding:8px}
- .stats {gap:8px}
- .stat {padding:12px}
- .panel {padding:15px}
- .file {align-items:flex-start;flex-wrap:wrap}
- .fileactions {margin-left:52px}
- .quickgrid {gap:9px}
- .quick {padding:13px}
- .footer {justify-content:center;text-align:center}
+@media (max-width: 420px) {
+    .grid { grid-template-columns: 1fr 1fr; gap: 9px; }
+    .card { padding: 14px; }
+    .stat-value { font-size: 21px; }
 }
 </style>
 </head>
 
-<body id="top">
-
+<body>
 <header class="topbar">
- <a class="brand" href="{{ url_for('home') }}">Tr!<span>5</span>h@</a>
- <nav class="nav">
-  <a href="{{ url_for('home') }}">⌂ Home</a>
-  <a href="#files">▣ Files</a>
-  <a href="{{ url_for('boxing_game') }}">🎮 Game</a>
-  <a href="#tools">✦ Tools</a>
-  <a href="{{ url_for('login') if not admin else url_for('logout') }}" class="login">
-   {{ 'Admin Login' if not admin else 'Logout' }}
-  </a>
-  <button type="button" id="themeBtn">☼ Theme</button>
- </nav>
+    <a class="brand" href="{{ url_for('home') }}">Harsh<span>Share</span> ✦</a>
+    <nav class="nav">
+        {% if session.get('is_owner') %}
+            <a href="{{ url_for('home') }}">Dashboard</a>
+            <a href="{{ url_for('recycle_bin') }}">Recycle Bin</a>
+            <form method="post" action="{{ url_for('logout') }}" style="margin:0">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="btn secondary" type="submit">Logout</button>
+            </form>
+        {% else %}
+            <a href="{{ url_for('login') }}">Owner Login</a>
+        {% endif %}
+    </nav>
 </header>
 
-<div class="wrap">
+<main class="container">
+    {% for message in get_flashed_messages() %}
+        <div class="flash">{{ message }}</div>
+    {% endfor %}
 
-{% with messages = get_flashed_messages() %}
-{% for msg in messages %}
-<div class="notice">{{ msg }}</div>
-{% endfor %}
-{% endwith %}
-
-{% if message %}
-<div class="notice">{{ message }}</div>
-{% endif %}
-
-<section class="welcome">
- <div class="intro">
-  <div class="eyebrow">SHARE · PLAY · GROW</div>
-  <h1>Your files.<br>Your <span>space.</span></h1>
-  <p>Welcome to Tr!5h@ — upload, find and download files, and take a break in the game zone.</p>
-  <div class="pills">
-   <span class="pill">🔒 Protected uploads</span>
-   <span class="pill">⚡ Quick file access</span>
-   <span class="pill">☁️ Cloud storage</span>
-  </div>
- </div>
-
- <div class="arena">
-  <div>YOUR BREAK TIME</div>
-  <h2>Game Zone</h2>
-  <p>Take a break and jump into the arena.</p>
-  <a class="btn" href="{{ url_for('boxing_game') }}">🎮 PLAY GAME ➜</a>
- </div>
-</section>
-
-<section class="stats">
- <div class="stat"><span class="icon">📁</span><strong>{{ files|length }}</strong><small>Available files</small></div>
- <div class="stat"><span class="icon">☁️</span><strong>Cloud</strong><small>File storage</small></div>
- <div class="stat"><span class="icon">🛡️</span><strong>{{ 'Admin' if admin else 'Visitor' }}</strong><small>Current access</small></div>
- <div class="stat"><span class="icon">🎮</span><strong>Game</strong><small>Ready to play</small></div>
-</section>
-
-<section class="main-grid">
-
-<div class="panel" id="files">
- <h2>📤 File Manager</h2>
- <div class="muted">Upload and manage files from one place.</div>
-
- {% if admin %}
- <form class="uploadbox" action="{{ url_for('upload') }}" method="post" enctype="multipart/form-data">
-  <strong>Upload a new file</strong>
-  <p class="muted">Maximum file size: 100 MB</p>
-  <input type="file" name="file" required>
-  <br><button class="btn" type="submit">⬆ Upload File</button>
- </form>
- {% else %}
- <div class="uploadbox">
-  <strong>Want to upload files?</strong>
-  <p class="muted">Admin login is required to upload or delete files.</p>
-  <a class="btn" href="{{ url_for('login') }}">🔑 Admin Login</a>
- </div>
- {% endif %}
-
- <div class="searchrow">
-  <input id="fileSearch" type="search" placeholder="🔍 Search files...">
-  <select id="fileCategory">
-   <option value="all">All types</option>
-   <option value="image">Images</option>
-   <option value="video">Videos</option>
-   <option value="document">Documents</option>
-   <option value="other">Others</option>
-  </select>
- </div>
-
- <div class="filelist" id="fileList">
- {% for item in files %}
- {% set ext = item.name.rsplit('.', 1)[-1].lower() if '.' in item.name else '' %}
- {% set kind = 'image' if ext in ['jpg','jpeg','png','gif','webp','svg','bmp'] else 'video' if ext in ['mp4','mov','avi','mkv','webm'] else 'document' if ext in ['pdf','doc','docx','txt','xls','xlsx','ppt','pptx','csv'] else 'other' %}
- <div class="file" data-name="{{ item.name|lower }}" data-kind="{{ kind }}">
-  <div class="fileicon">{{ '🖼️' if kind == 'image' else '🎬' if kind == 'video' else '📄' if kind == 'document' else '📦' }}</div>
-  <div><div class="filename">{{ item.name }}</div><div class="filemeta">{{ kind|title }}</div></div>
-  <div class="fileactions">
-   <a class="smallbtn" href="{{ url_for('download', file_id=item.id) }}">Download</a>
-   {% if admin %}
-   <form class="delete-form" action="{{ url_for('delete', file_id=item.id) }}" method="post" onsubmit="return confirm('Delete this file?')">
-    <button class="smallbtn" type="submit">Delete</button>
-   </form>
-   {% endif %}
-  </div>
- </div>
- {% endfor %}
- </div>
- <div class="empty" id="noMatches" {% if files %}hidden{% endif %}>No files found.</div>
-</div>
-
-<div class="panel" id="tools">
- <h2>✨ Quick Access</h2>
- <p class="muted">Jump straight to the section you need.</p>
- <div class="quickgrid" style="grid-template-columns:repeat(2,1fr);margin-top:15px">
-  <a class="quick" href="#files"><div class="qicon">🔎</div><strong>Find Files</strong><small>Search uploaded files</small></a>
-  <a class="quick" href="{{ url_for('boxing_game') }}"><div class="qicon">🎮</div><strong>Game</strong><small>Open the game zone</small></a>
-  <a class="quick" href="{{ url_for('login') if not admin else url_for('logout') }}"><div class="qicon">👤</div><strong>{{ 'Admin Access' if not admin else 'Sign Out' }}</strong><small>Manage file access</small></a>
-  <a class="quick" href="#top"><div class="qicon">⬆️</div><strong>Back to Top</strong><small>Return to homepage</small></a>
- </div>
- <div class="uploadbox">
-  <strong>💡 Quick tip</strong>
-  <p class="muted">Search by file name or filter by type.</p>
- </div>
-</div>
-</section>
-
-<section class="section-title">
- <div><h2>Explore Tr!5h@</h2><p class="muted">Your files and game in one place.</p></div>
-</section>
-
-<section class="quickgrid">
- <a class="quick" href="#files"><div class="qicon">📚</div><strong>Browse Files</strong><small>See available uploads</small></a>
- <a class="quick" href="#fileSearch"><div class="qicon">🔍</div><strong>Search</strong><small>Find a file quickly</small></a>
- <a class="quick" href="{{ url_for('boxing_game') }}"><div class="qicon">🕹️</div><strong>Game</strong><small>Open the game zone</small></a>
- <a class="quick" href="{{ url_for('login') if not admin else url_for('logout') }}"><div class="qicon">⚙️</div><strong>Admin Panel</strong><small>Manage site access</small></a>
-</section>
-</div>
-
-<footer class="footer">
- <div><div class="brand">Tr!<span>5</span>h@</div><small>Share · Play · Grow</small></div>
- <div>Made bye Harsh Sharma</div>
- <small>Tr!5h@ · File Sharing + Game</small>
-</footer>
-
-<script>
-const search = document.getElementById('fileSearch');
-const category = document.getElementById('fileCategory');
-
-function filterFiles() {
- const q = (search.value || '').toLowerCase().trim();
- const kind = category.value;
- let visible = 0;
-
- document.querySelectorAll('#fileList .file').forEach(row => {
-  const okName = (row.dataset.name || '').includes(q);
-  const okKind = kind === 'all' || row.dataset.kind === kind;
-  row.hidden = !(okName && okKind);
-  if (!row.hidden) visible++;
- });
-
- document.getElementById('noMatches').hidden = visible !== 0;
-}
-
-search.addEventListener('input', filterFiles);
-category.addEventListener('change', filterFiles);
-
-document.getElementById('themeBtn').addEventListener('click', () => {
- document.body.classList.toggle('dark');
- try {
-  localStorage.setItem('trisha-dark', document.body.classList.contains('dark') ? '1' : '0');
- } catch(e) {}
-});
-
-try {
- if (localStorage.getItem('trisha-dark') === '1') {
-  document.body.classList.add('dark');
- }
-} catch(e) {}
-</script>
-</body>
-</html>
-"""
-
-LOGIN_PAGE = """
-<!doctype html>
-<html lang="en">
-<head>
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Tr!5h@ Admin Login</title>
-<style>
-body{font-family:Arial,sans-serif;background:#fff7f8;margin:0;min-height:100vh;display:grid;place-items:center;color:#20232a}
-.card{background:white;border:1px solid #f1d5d8;border-radius:18px;padding:28px;width:min(90%,400px);box-shadow:0 10px 30px #8f061018}
-h1{color:#c1121f;margin-top:0}
-input{width:100%;padding:12px;border:1px solid #e5bfc3;border-radius:9px;margin:10px 0 16px;box-sizing:border-box}
-button{background:#c1121f;color:white;border:0;border-radius:9px;padding:12px 18px;font-weight:bold;cursor:pointer}
-a{color:#c1121f;text-decoration:none}
-</style>
-</head>
-<body>
-<main class="card">
-<h1>Tr!5h@ Admin</h1>
-<p>Sign in to upload and manage cloud files.</p>
-<form method="post">
-<input type="password" name="password" placeholder="Admin password" required autofocus>
-<button type="submit">Login</button>
-</form>
-<p><a href="/">← Back to Home</a></p>
+    {{ body|safe }}
 </main>
+
+<footer>
+    HarshShare · White + Premium Red · Owner Access Protected
+</footer>
 </body>
 </html>
 """
 
 
-def _to_dict(obj):
-    if isinstance(obj, dict):
-        return obj
-    if hasattr(obj, "model_dump"):
-        return obj.model_dump(by_alias=False)
-    if hasattr(obj, "dict"):
-        return obj.dict()
-    return {}
-
-
-def _field(obj, *names, default=None):
-    data = _to_dict(obj)
-    for name in names:
-        if name in data and data[name] is not None:
-            return data[name]
-        camel = name.split("_")[0] + "".join(
-            part.title() for part in name.split("_")[1:]
-        )
-        if camel in data and data[camel] is not None:
-            return data[camel]
-        if hasattr(obj, name):
-            value = getattr(obj, name)
-            if value is not None:
-                return value
-    return default
-
-
-def _require_cloud():
-    if not imagekit or not IMAGEKIT_PRIVATE_KEY or not IMAGEKIT_URL_ENDPOINT:
-        abort(503, description="Render Environment Variables check karein.")
-
-
-def _list_cloud_files():
-    _require_cloud()
-    response = imagekit.assets.list(path=IMAGEKIT_FOLDER, limit=100)
-    data = _to_dict(response)
-    assets = data.get("assets") or data.get("files") or data.get("results")
-
-    if assets is None and isinstance(response, list):
-        assets = response
-    if assets is None:
-        assets = getattr(response, "assets", None) or getattr(response, "files", None) or []
-
-    result = []
-    for asset in assets:
-        file_id = _field(asset, "file_id", "id")
-        name = _field(asset, "name", "file_name", "filename", default="Unnamed file")
-        url = _field(asset, "url", "file_url")
-
-        if file_id and name:
-            result.append({
-                "id": str(file_id),
-                "name": str(name),
-                "url": url or ""
-            })
-
-    return sorted(result, key=lambda item: item["name"].lower())
-
-
-@app.route("/")
-def home():
-    try:
-        files = _list_cloud_files()
-        message = ""
-    except Exception:
-        logger.exception("Could not list ImageKit files")
-        files = []
-        message = "Cloud files load nahi ho paayi. ImageKit credentials ya SDK logs check karein."
-
+def render_page(title, body, **context):
     return render_template_string(
         PAGE,
-        files=files,
-        admin=session.get("admin", False),
-        message=message
+        title=title,
+        body=render_template_string(body, **context),
     )
 
 
-@app.route("/game")
-def boxing_game():
-    return render_template("game.html")
+# =====================================================
+# LOGIN
+# =====================================================
+
+LOGIN_TEMPLATE = r"""
+<div class="hero" style="max-width:500px;margin:40px auto">
+    <div class="eyebrow">PRIVATE OWNER ACCESS</div>
+
+    <div style="text-align:center;margin:20px 0">
+        <div class="crown">👑</div>
+        <div class="owner-name">Tr!5h@</div>
+        <span class="badge">OWNER</span>
+    </div>
+
+    <h1 style="text-align:center">Welcome back</h1>
+    <p class="muted" style="text-align:center">
+        Sign in to manage your files.
+    </p>
+
+    <form method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+        <label>Username</label>
+        <input name="username" value="Tr!5h@" autocomplete="username"
+               required style="width:100%;margin:8px 0 16px">
+
+        <label>Password</label>
+        <input name="password" type="password"
+               autocomplete="current-password" required
+               style="width:100%;margin:8px 0 18px">
+
+        <button class="btn" style="width:100%" type="submit">
+            Secure Login →
+        </button>
+    </form>
+</div>
+"""
 
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
-    if not ADMIN_PASSWORD or not app.secret_key:
-        return "Render Environment mein HARSHSHARE_ADMIN_PASSWORD aur HARSHSHARE_SECRET_KEY set karein.", 503
+    if not ADMIN_PASSWORD_HASH:
+        return render_page(
+            "Setup Required",
+            """
+            <div class="hero">
+                <h1>Admin setup required</h1>
+                <p>Set ADMIN_PASSWORD_HASH and SECRET_KEY in your
+                environment before enabling login.</p>
+            </div>
+            """
+        ), 503
 
     if request.method == "POST":
-        password = request.form.get("password", "")
-        if hmac.compare_digest(password, ADMIN_PASSWORD):
-            session["admin"] = True
-            return redirect(url_for("home"))
-
-        return "Password galat hai. <a href='/login'>Dobara try karein</a>", 401
-
-    return LOGIN_PAGE
-
-
-@app.route("/upload", methods=["POST"])
-def upload():
-    if not session.get("admin"):
-        abort(403)
-
-    _require_cloud()
-    uploaded = request.files.get("file")
-
-    if not uploaded or not uploaded.filename:
-        abort(400, description="File select karein.")
-
-    filename = secure_filename(uploaded.filename)
-    if not filename or filename in {".", ".."}:
-        abort(400, description="Invalid filename.")
-
-    try:
-        file_bytes = uploaded.read()
-        response = imagekit.files.upload(
-            file=file_bytes,
-            file_name=filename,
-            folder=IMAGEKIT_FOLDER,
-            use_unique_file_name=True,
-        )
-
-        uploaded_id = _field(response, "file_id", "id")
-        if not uploaded_id:
-            logger.error("ImageKit upload response incomplete: %s", _to_dict(response))
-            abort(502, description="ImageKit upload response incomplete.")
-
-        flash("File cloud par upload ho gayi.")
-
-    except Exception:
-        logger.exception("ImageKit upload failed")
-        abort(502, description="Upload fail ho gaya. Render logs check karein.")
-
-    return redirect(url_for("home"))
-
-
-@app.route("/download/<path:file_id>")
-def download(file_id):
-    _require_cloud()
-
-    try:
-        files = _list_cloud_files()
-        asset = next((item for item in files if item["id"] == file_id), None)
-
-        if not asset:
-            abort(404)
-
-        if not asset["url"]:
-            abort(404, description="File URL nahi mili.")
-
-        return redirect(asset["url"])
-
-    except Exception:
-        logger.exception("ImageKit download lookup failed")
-        abort(502, description="File locate nahi ho paayi.")
-
-
-@app.route("/delete/<path:file_id>", methods=["POST"])
-def delete(file_id):
-    if not session.get("admin"):
-        abort(403)
-
-    _require_cloud()
-
-    try:
-        files = _list_cloud_files()
-        asset = next((item for item in files if item["id"] == file_id), None)
-
-        if not asset:
-            abort(404)
-
-        imagekit.files.delete(file_id)
-        def _to_dict(obj):
-    """Convert SDK objects to dictionaries."""
-    if isinstance(obj, dict):
-        return obj
-    if hasattr(obj, "model_dump"):
-        return obj.model_dump(by_alias=False)
-    if hasattr(obj, "dict"):
-        return obj.dict()
-    return {}
-
-
-def _field(obj, *names, default=None):
-    data = _to_dict(obj)
-    for name in names:
-        if name in data and data[name] is not None:
-            return data[name]
-        camel = name.split("_")[0] + "".join(
-            part.title() for part in name.split("_")[1:]
-        )
-        if camel in data and data[camel] is not None:
-            return data[camel]
-        if hasattr(obj, name):
-            value = getattr(obj, name)
-            if value is not None:
-                return value
-    return default
-
-
-def _require_cloud():
-    if not imagekit or not IMAGEKIT_PRIVATE_KEY or not IMAGEKIT_URL_ENDPOINT:
-        abort(
-            503,
-            description="ImageKit configure nahi hai. Render Environment Variables check karein."
-        )
-
-
-def _list_cloud_files():
-    """Fetch files from the HarshShare folder in ImageKit."""
-    _require_cloud()
-    response = imagekit.assets.list(path=IMAGEKIT_FOLDER, limit=100)
-    data = _to_dict(response)
-
-    assets = data.get("assets") or data.get("files") or data.get("results")
-    if assets is None and isinstance(response, list):
-        assets = response
-    if assets is None:
-        assets = (
-            getattr(response, "assets", None)
-            or getattr(response, "files", None)
-            or []
-        )
-
-    result = []
-    for asset in assets:
-        file_id = _field(asset, "file_id", "id")
-        name = _field(
-            asset, "name", "file_name", "filename",
-            default="Unnamed file"
-        )
-        url = _field(asset, "url", "file_url")
-
-        if file_id and name:
-            result.append({
-                "id": str(file_id),
-                "name": str(name),
-                "url": url or ""
-            })
-
-    return sorted(result, key=lambda item: item["name"].lower())
-
-
-@app.route("/")
-def home():
-    try:
-        files = _list_cloud_files()
-        message = ""
-    except Exception:
-        logger.exception("Could not list ImageKit files")
-        files = []
-        message = (
-            "Cloud files load nahi ho paayi. "
-            "ImageKit credentials ya SDK logs check karein."
-        )
-
-    return render_template_string(
-        PAGE,
-        files=files,
-        admin=session.get("admin", False),
-        message=message
-    )
-
-
-@app.route("/game")
-def boxing_game():
-    # Existing game page ko preserve karega.
-    return render_template("game.html")
-
-
-@app.route("/login", methods=["GET", "POST"])
-def login():
-    if not ADMIN_PASSWORD or not app.secret_key:
-        return (
-            "Render Environment mein HARSHSHARE_ADMIN_PASSWORD "
-            "aur HARSHSHARE_SECRET_KEY set karein.",
-            503
-        )
-
-    if request.method == "POST":
+        username = request.form.get("username", "")
         password = request.form.get("password", "")
 
-        if hmac.compare_digest(password, ADMIN_PASSWORD):
-            session["admin"] = True
-            return redirect(url_for("home"))
-
-        return "Password galat hai. <a href='/login'>Dobara try karein</a>", 401
-
-    return LOGIN_PAGE
-
-
-@app.route("/upload", methods=["POST"])
-def upload():
-    if not session.get("admin"):
-        abort(403)
-
-    _require_cloud()
-
-    uploaded = request.files.get("file")
-    if not uploaded or not uploaded.filename:
-        abort(400, description="File select karein.")
-
-    filename = secure_filename(uploaded.filename)
-    if not filename or filename in {".", ".."}:
-        abort(400, description="Invalid filename.")
-
-    try:
-        file_bytes = uploaded.read()
-
-        response = imagekit.files.upload(
-            file=file_bytes,
-            file_name=filename,
-            folder=IMAGEKIT_FOLDER,
-            use_unique_file_name=True,
-        )
-
-        uploaded_id = _field(response, "file_id", "id")
-        if not uploaded_id:
-            logger.error(
-                "ImageKit upload response incomplete: %s",
-                _to_dict(response)
+        try:
+            valid_password = check_password_hash(
+                ADMIN_PASSWORD_HASH, password
             )
-            abort(502, description="ImageKit upload response incomplete.")
+        except (ValueError, TypeError):
+            valid_password = False
 
-        flash("File cloud par upload ho gayi.")
+        if hmac.compare_digest(username, OWNER_USERNAME) and valid_password:
+            session.clear()
+            session["is_owner"] = True
+            session["csrf_token"] = secrets.token_urlsafe(32)
+            flash("Welcome, Tr!5h@ 👑")
+            return redirect(url_for("home"))
 
-    except Exception:
-        logger.exception("ImageKit upload failed")
-        abort(
-            502,
-            description="Upload fail ho gaya. ImageKit dashboard aur Render logs check karein."
-        )
+        flash("Incorrect username or password.")
 
-    return redirect(url_for("home"))
-
-
-@app.route("/download/<path:file_id>")
-def download(file_id):
-    _require_cloud()
-
-    try:
-        files = _list_cloud_files()
-        asset = next(
-            (item for item in files if item["id"] == file_id),
-            None
-        )
-
-        if not asset:
-            abort(404)
-
-        if not asset["url"]:
-            abort(404, description="File URL nahi mili.")
-
-        return redirect(asset["url"])
-
-    except Exception:
-        logger.exception("ImageKit download lookup failed")
-        abort(502, description="File locate nahi ho paayi.")
+    return render_page("Owner Login", LOGIN_TEMPLATE)
 
 
-@app.route("/delete/<path:file_id>", methods=["POST"])
-def delete(file_id):
-    if not session.get("admin"):
-        abort(403)
-
-    _require_cloud()
-
-    try:
-        files = _list_cloud_files()
-        asset = next(
-            (item for item in files if str(item.get("id")) == str(file_id)),
-            None
-        )
-
-        if not asset:
-            abort(404, description="ImageKit mein file ID nahi mili.")
-
-        imagekit.files.delete(file_id)
-        flash("File cloud se delete kar di gayi.")
-
-    except Exception as error:
-        if getattr(error, "code", None) == 404:
-            abort(404, description="ImageKit mein file nahi mili.")
-
-        logger.exception("ImageKit delete failed")
-        abort(
-            502,
-            description="Delete fail ho gaya. Render logs check karein."
-        )
-
-    return redirect(url_for("home"))
-
-
-@app.route("/logout")
+@app.post("/logout")
+@owner_required
 def logout():
     session.clear()
-    return redirect(url_for("home"))
+    return redirect(url_for("login"))
 
 
-@app.errorhandler(413)
-def file_too_large(_error):
-    return "File 100 MB se badi hai. Chhoti file try karein.", 413
+# =====================================================
+# DASHBOARD
+# =====================================================
+
+HOME_TEMPLATE = r"""
+<section class="hero">
+    <div class="eyebrow">YOUR PERSONAL FILE CLOUD</div>
+    <h1>Manage everything.<br><span style="color:var(--red)">One place.</span></h1>
+    <p class="muted">Upload, organize, preview and share your files.</p>
+
+    <div class="owner">
+        <div class="crown">👑</div>
+        <div class="owner-name">Tr!5h@</div>
+        <span class="badge">OWNER</span>
+    </div>
+</section>
+
+<section class="grid">
+    <div class="card">
+        <div class="stat-label">ACTIVE FILES</div>
+        <div class="stat-value">{{ total_files }}</div>
+    </div>
+    <div class="card">
+        <div class="stat-label">STORAGE USED</div>
+        <div class="stat-value">{{ total_size|filesize }}</div>
+    </div>
+    <div class="card">
+        <div class="stat-label">TRASHED FILES</div>
+        <div class="stat-value">{{ trash_count }}</div>
+    </div>
+    <div class="card">
+        <div class="stat-label">MAX UPLOAD</div>
+        <div class="stat-value">{{ max_mb }} MB</div>
+    </div>
+</section>
+
+<section class="card">
+    <div class="section-title" style="margin-top:0">＋ Upload Files</div>
+    <form class="upload-box" method="post"
+          action="{{ url_for('upload') }}" enctype="multipart/form-data">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="file" name="files" multiple required
+               style="width:100%;margin-bottom:14px">
+        <button class="btn" type="submit">Upload Files ↑</button>
+    </form>
+    <p class="muted">Maximum request size: {{ max_mb }} MB.</p>
+</section>
+
+<div class="section-title">Your Files</div>
+
+<form class="toolbar" method="get">
+    <input class="search" name="q" value="{{ query }}"
+           placeholder="Search by filename...">
+
+    <select name="type">
+        <option value="">All file types</option>
+        <option value="image" {% if kind == 'image' %}selected{% endif %}>Images</option>
+        <option value="pdf" {% if kind == 'pdf' %}selected{% endif %}>PDF</option>
+        <option value="text" {% if kind == 'text' %}selected{% endif %}>Text</option>
+        <option value="other" {% if kind == 'other' %}selected{% endif %}>Other</option>
+    </select>
+
+    <button class="btn" type="submit">Search</button>
+</form>
+
+<section class="card">
+{% if files %}
+    {% for f in files %}
+    <div class="file-row">
+        <div style="flex:1;min-width:170px">
+            <div class="file-name">📄 {{ f['filename'] }}</div>
+            <div class="file-meta">
+                {{ f['size']|filesize }} · {{ f['uploaded_at'] }}
+            </div>
+        </div>
+
+        <div class="actions">
+            {% if f['mime_type'] and
+                  (f['mime_type'].startswith('image/') or
+                   f['mime_type'] == 'application/pdf' or
+                   f['mime_type'].startswith('text/')) %}
+                <a class="btn secondary"
+                   href="{{ url_for('preview', file_id=f['id']) }}">Preview</a>
+            {% endif %}
+
+            <a class="btn"
+               href="{{ url_for('download', file_id=f['id']) }}">Download</a>
+
+            <form method="post"
+                  action="{{ url_for('create_share', file_id=f['id']) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="btn secondary" type="submit">Share</button>
+            </form>
+
+            <form method="post"
+                  action="{{ url_for('delete_file', file_id=f['id']) }}"
+                  onsubmit="return confirm('Move this file to Recycle Bin?')">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="btn danger" type="submit">Delete</button>
+            </form>
+        </div>
+    </div>
+    {% endfor %}
+{% else %}
+    <p class="muted">No files found. Upload your first file above.</p>
+{% endif %}
+</section>
+"""
 
 
-if __name__ == "__main__":
-    app.run(
-        host="0.0.0.0",
-        port=int(os.environ.get("PORT", 10000)),
-        debug=False
+@app.get("/")
+@owner_required
+def home():
+    query = request.args.get("q", "").strip()[:100]
+    kind = request.args.get("type", "")
+
+    with db() as conn:
+        files = conn.execute(
+            """
+            SELECT * FROM files
+            WHERE deleted_at IS NULL
+            ORDER BY uploaded_at DESC
+            """
+        ).fetchall()
+
+        trash_count = conn.execute(
+            "SELECT COUNT(*) FROM files WHERE deleted_at IS NOT NULL"
+        ).fetchone()[0]
+
+    selected = []
+
+    for f in files:
+        if query and query.casefold() not in f["filename"].casefold():
+            continue
+
+        mime = f["mime_type"] or ""
+
+        if kind == "image" and not mime.startswith("image/"):
+            continue
+        if kind == "pdf" and mime != "application/pdf":
+            continue
+        if kind == "text" and not mime.startswith("text/"):
+            continue
+        if kind == "other" and (
+            mime.startswith("image/")
+            or mime == "application/pdf"
+            or mime.startswith("text/")
+        ):
+            continue
+
+        selected.append(dict(f))
+
+    total_size = sum(f["size"] for f in files)
+
+    return render_page(
+        "Dashboard",
+        HOME_TEMPLATE,
+        files=selected,
+        total_files=len(files),
+        total_size=total_size,
+        trash_count=trash_count,
+        max_mb=MAX_UPLOAD_MB,
+        query=query,
+        kind=kind,
     )
+
+
+# =====================================================
+# UPLOAD
+# =====================================================
+
+@app.post("/upload")
+@owner_required
+def upload():
+    incoming = request.files.getlist("files")
+
+    if not incoming:
+        flash("Select at least one file.")
+        return redirect(url_for("home"))
+
+    successful = 0
+
+    for file in incoming:
+        if not file or not file.filename:
+            continue
+
+        filename = secure_filename(file.filename)
+
+        if not filename or not allowed_file(filename):
+            continue
+
+        file_id = uuid.uuid4().hex
+        stored_name = uuid.uuid4().hex
+        destination = UPLOAD_DIR / stored_name
+
+        # Stream the upload to disk instead of reading it all into memory.
+        file.save(destination)
+
+        size = destination.stat().st_size
+        mime_type = mimety
