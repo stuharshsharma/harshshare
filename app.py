@@ -1,6 +1,6 @@
 from flask import (
-    Flask, request, render_template, render_template_string,
-    abort, session, redirect, url_for, flash
+    Flask, request, render_template_string, abort, session, redirect,
+    url_for, flash
 )
 from werkzeug.utils import secure_filename
 from imagekitio import ImageKit
@@ -11,7 +11,6 @@ import logging
 app = Flask(__name__)
 app.secret_key = os.environ.get("HARSHSHARE_SECRET_KEY", "")
 
-# Existing ImageKit configuration — unchanged
 IMAGEKIT_PRIVATE_KEY = os.environ.get("IMAGEKIT_PRIVATE_KEY", "")
 IMAGEKIT_URL_ENDPOINT = os.environ.get("IMAGEKIT_URL_ENDPOINT", "").rstrip("/")
 IMAGEKIT_FOLDER = "/harshshare"
@@ -24,606 +23,612 @@ ADMIN_PASSWORD = os.environ.get("HARSHSHARE_ADMIN_PASSWORD", "")
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-
-# =========================
-# HOMEPAGE DESIGN
-# =========================
-
 PAGE = """
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="theme-color" content="#c1121f">
-<title>HarshShare | Share & Play</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tr!5h@ | Share • Play • Grow</title>
 
 <style>
 :root {
-    --red: #c1121f;
-    --dark-red: #920d17;
-    --light-red: #fff0f1;
-    --text: #241c1d;
-    --muted: #74696a;
-    --border: #f0dadd;
-    --white: #ffffff;
+ --red:#d10d1b;
+ --deep:#8f0610;
+ --ink:#17202b;
+ --muted:#647184;
+ --card:#fff;
+ --line:#f1dadd;
+ --shadow:0 10px 28px rgba(120,0,15,.09);
 }
 
-* {
-    box-sizing: border-box;
-}
+* {box-sizing:border-box}
+html {scroll-behavior:smooth}
 
 body {
-    margin: 0;
-    background: #fffafa;
-    color: var(--text);
-    font-family: Arial, Helvetica, sans-serif;
+ margin:0;
+ background:linear-gradient(135deg,#fff,#fff6f7,#fff);
+ color:var(--ink);
+ font-family:Arial,sans-serif;
 }
 
-a {
-    text-decoration: none;
-    overflow-wrap: anywhere;
-}
+a {color:inherit;text-decoration:none}
+button,input,select {font:inherit}
 
-.navbar {
-    background: white;
-    border-bottom: 1px solid var(--border);
-}
-
-.nav-inner {
-    max-width: 1100px;
-    margin: auto;
-    padding: 17px 22px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
+.topbar {
+ position:sticky;
+ top:0;
+ z-index:10;
+ display:flex;
+ align-items:center;
+ justify-content:space-between;
+ gap:18px;
+ padding:14px 4%;
+ background:#ffffffed;
+ border-bottom:1px solid var(--line);
 }
 
 .brand {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    color: var(--text);
-    font-size: 22px;
-    font-weight: 800;
+ font-size:30px;
+ font-weight:900;
+ font-style:italic;
+ letter-spacing:-1.5px;
 }
 
-.brand-icon {
-    display: grid;
-    place-items: center;
-    width: 40px;
-    height: 40px;
-    color: white;
-    background: var(--red);
-    border-radius: 12px;
+.brand span {color:var(--red)}
+
+.nav {
+ display:flex;
+ gap:8px;
+ flex-wrap:wrap;
+ align-items:center;
 }
 
-.nav-link {
-    color: var(--red);
-    font-size: 14px;
-    font-weight: bold;
+.nav a,.nav button {
+ border:0;
+ background:transparent;
+ border-radius:12px;
+ padding:11px;
+ cursor:pointer;
 }
 
-.container {
-    max-width: 1100px;
-    margin: auto;
-    padding: 35px 22px 50px;
+.nav a:hover,.nav button:hover {
+ background:#fff0f1;
+ color:var(--red);
 }
 
-.hero {
-    text-align: center;
-    padding: 20px 0 35px;
+.login {
+ border:1px solid var(--red)!important;
+ color:var(--red)!important;
 }
 
-.badge {
-    display: inline-block;
-    padding: 8px 13px;
-    color: var(--red);
-    background: white;
-    border: 1px solid var(--border);
-    border-radius: 30px;
-    font-size: 12px;
-    font-weight: bold;
-    letter-spacing: 1px;
+.wrap {
+ max-width:1440px;
+ margin:auto;
+ padding:26px 20px 0;
 }
 
-.hero h1 {
-    margin: 18px 0 12px;
-    font-size: clamp(34px, 5vw, 52px);
-    letter-spacing: -1.5px;
+.welcome {
+ display:grid;
+ grid-template-columns:1fr 1fr;
+ gap:20px;
+ align-items:stretch;
 }
 
-.hero h1 span {
-    color: var(--red);
+.intro {padding:22px 10px}
+
+.eyebrow {
+ color:var(--red);
+ font-size:12px;
+ font-weight:800;
+ letter-spacing:3px;
 }
 
-.hero p {
-    max-width: 570px;
-    margin: auto;
-    color: var(--muted);
-    line-height: 1.7;
+.intro h1 {
+ font-size:clamp(38px,5vw,70px);
+ line-height:1;
+ margin:12px 0;
 }
 
-.grid {
-    display: grid;
-    grid-template-columns: 1.1fr .9fr;
-    gap: 22px;
+.intro h1 span {color:var(--red)}
+
+.intro p {
+ color:var(--muted);
+ line-height:1.7;
 }
 
-.card {
-    min-width: 0;
-    padding: 25px;
-    background: white;
-    border: 1px solid var(--border);
-    border-radius: 20px;
-    box-shadow: 0 10px 30px rgba(100, 0, 15, .05);
+.pills {
+ display:flex;
+ gap:10px;
+ flex-wrap:wrap;
+ margin-top:20px;
 }
 
-.card-heading {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    margin-bottom: 20px;
+.pill {
+ background:#fff;
+ border:1px solid var(--line);
+ border-radius:30px;
+ padding:9px 13px;
+ font-size:13px;
 }
 
-.icon {
-    flex-shrink: 0;
-    width: 48px;
-    height: 48px;
-    display: grid;
-    place-items: center;
-    background: var(--light-red);
-    border-radius: 14px;
-    font-size: 24px;
+.arena {
+ min-height:250px;
+ border-radius:22px;
+ padding:28px;
+ color:white;
+ background:radial-gradient(ellipse at top,#ff515b,#51030a 55%,#09090c);
+ display:flex;
+ flex-direction:column;
+ align-items:center;
+ justify-content:center;
+ text-align:center;
 }
 
-h2 {
-    margin: 0 0 7px;
-    font-size: 22px;
+.arena h2 {
+ font-size:clamp(30px,4vw,48px);
+ margin:12px 0;
+ text-transform:uppercase;
+ font-style:italic;
 }
 
-.subtitle {
-    margin: 0;
-    color: var(--muted);
-    font-size: 14px;
-    line-height: 1.6;
+.arena p {color:#f6dfe1}
+
+.btn {
+ display:inline-flex;
+ align-items:center;
+ justify-content:center;
+ background:linear-gradient(135deg,#f51b2b,#a4000c);
+ color:white;
+ border:0;
+ border-radius:12px;
+ padding:13px 20px;
+ font-weight:bold;
+ cursor:pointer;
 }
 
-.upload-box {
-    padding: 18px;
-    background: #fffafa;
-    border: 1px dashed #e5bfc3;
-    border-radius: 14px;
+.btn:hover {filter:brightness(1.1)}
+
+.section-title {
+ display:flex;
+ justify-content:space-between;
+ align-items:end;
+ margin:28px 0 14px;
 }
 
-input[type=file] {
-    display: block;
-    width: 100%;
-    margin: 0 0 15px;
+.section-title h2 {margin:0}
+
+.stats {
+ display:grid;
+ grid-template-columns:repeat(4,1fr);
+ gap:13px;
+ margin-top:22px;
 }
 
-button, .btn {
-    display: inline-block;
-    padding: 12px 17px;
-    color: white;
-    background: var(--red);
-    border: none;
-    border-radius: 10px;
-    font-family: inherit;
-    font-size: 14px;
-    font-weight: bold;
-    cursor: pointer;
-    text-align: center;
+.stat,.panel,.quick {
+ background:var(--card);
+ border:1px solid var(--line);
+ border-radius:17px;
+ box-shadow:var(--shadow);
 }
 
-button:hover, .btn:hover {
-    color: white;
-    background: var(--dark-red);
+.stat {padding:16px}
+.stat .icon {font-size:22px}
+.stat strong {
+ display:block;
+ font-size:25px;
+ margin:8px 0 3px;
 }
 
-.outline-btn {
-    color: var(--red);
-    background: white;
-    border: 1px solid var(--border);
+.stat small,.muted {color:var(--muted)}
+
+.main-grid {
+ display:grid;
+ grid-template-columns:1.1fr .9fr;
+ gap:18px;
+ margin-top:22px;
 }
 
-.outline-btn:hover {
-    color: var(--dark-red);
-    background: var(--light-red);
+.panel {
+ padding:20px;
+ min-width:0;
 }
 
-.game-card {
-    position: relative;
-    overflow: hidden;
-    color: white;
-    background: linear-gradient(145deg, #d51b2a, #850b15);
-    border-color: #a80d1a;
+.panel h2 {margin-top:0}
+
+.uploadbox {
+ margin-top:16px;
+ border:1px dashed #e5aab0;
+ border-radius:14px;
+ padding:17px;
+ background:#fffafb;
 }
 
-.game-card h2 {
-    color: white;
+.uploadbox input[type=file] {
+ max-width:100%;
+ margin-bottom:12px;
 }
 
-.game-card .subtitle {
-    color: #ffe5e7;
+.searchrow {
+ display:flex;
+ gap:9px;
+ margin:16px 0 12px;
+ flex-wrap:wrap;
 }
 
-.game-card .icon {
-    background: rgba(255,255,255,.16);
+.searchrow input {
+ flex:1;
+ min-width:150px;
+ border:1px solid var(--line);
+ border-radius:10px;
+ padding:11px;
 }
 
-.game-tag {
-    display: inline-block;
-    margin: 8px 0 18px;
-    padding: 8px 12px;
-    border: 1px solid rgba(255,255,255,.3);
-    border-radius: 30px;
-    font-size: 12px;
-    font-weight: bold;
+.searchrow select {
+ border:1px solid var(--line);
+ border-radius:10px;
+ padding:11px;
 }
 
-.game-card .btn {
-    color: var(--red);
-    background: white;
-}
-
-.game-card .btn:hover {
-    background: #fff0f1;
-}
-
-.files-card {
-    margin-top: 22px;
-}
-
-.files-heading {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    margin-bottom: 12px;
-}
-
-.file-count {
-    color: var(--muted);
-    font-size: 12px;
+.filelist {
+ max-height:360px;
+ overflow:auto;
 }
 
 .file {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 14px;
-    padding: 15px 0;
-    border-bottom: 1px solid #f4e6e8;
+ display:flex;
+ align-items:center;
+ gap:12px;
+ padding:13px 0;
+ border-bottom:1px solid #f5e7e9;
 }
 
-.file:last-child {
-    border-bottom: none;
+.fileicon {
+ width:40px;
+ height:40px;
+ display:grid;
+ place-items:center;
+ border-radius:12px;
+ background:#fff0f1;
+ font-size:20px;
+ flex-shrink:0;
 }
 
-.file-name {
-    min-width: 0;
-    overflow-wrap: anywhere;
-    font-size: 14px;
-    font-weight: bold;
+.filename {
+ font-weight:bold;
+ overflow-wrap:anywhere;
 }
 
-.file-actions {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-shrink: 0;
+.filemeta {
+ color:var(--muted);
+ font-size:12px;
+ margin-top:4px;
 }
 
-.file-actions .btn,
-.file-actions button {
-    padding: 9px 11px;
-    font-size: 12px;
+.fileactions {
+ margin-left:auto;
+ display:flex;
+ gap:7px;
+ align-items:center;
 }
 
-.delete-form {
-    display: inline;
-    margin: 0;
+.smallbtn {
+ border:1px solid var(--line);
+ border-radius:9px;
+ background:#fff;
+ padding:8px 10px;
+ color:var(--red);
+ cursor:pointer;
+}
+
+.delete-form {display:inline}
+
+.quickgrid {
+ display:grid;
+ grid-template-columns:repeat(4,1fr);
+ gap:13px;
+}
+
+.quick {
+ padding:17px;
+ transition:.18s;
+}
+
+.quick:hover {
+ transform:translateY(-3px);
+ border-color:#e8a3aa;
+}
+
+.qicon {font-size:24px}
+.quick strong {
+ display:block;
+ margin:9px 0 5px;
+}
+
+.quick small {
+ color:var(--muted);
+ line-height:1.5;
 }
 
 .notice {
-    margin-bottom: 17px;
-    padding: 13px 15px;
-    color: var(--dark-red);
-    background: var(--light-red);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    font-size: 14px;
-    line-height: 1.5;
+ padding:12px 14px;
+ border-radius:12px;
+ background:#fff0f1;
+ color:#8f0610;
+ margin:12px 0;
 }
 
 .empty {
-    padding: 25px 10px;
-    text-align: center;
-    color: var(--muted);
-    background: #fffafa;
-    border-radius: 12px;
+ padding:24px 8px;
+ color:var(--muted);
+ text-align:center;
 }
 
 .footer {
-    padding: 27px 0 0;
-    color: #8a7e80;
-    text-align: center;
-    font-size: 12px;
+ margin-top:34px;
+ background:linear-gradient(120deg,#160307,#350008);
+ border-top:4px solid #e90d22;
+ color:white;
+ padding:24px 4%;
+ display:flex;
+ justify-content:space-between;
+ align-items:center;
+ gap:16px;
+ flex-wrap:wrap;
 }
 
-@media (max-width: 760px) {
-    .container {
-        padding: 22px 14px 35px;
-    }
+.footer small {color:#eacdd0}
 
-    .grid {
-        grid-template-columns: 1fr;
-    }
-
-    .card {
-        padding: 20px;
-        border-radius: 17px;
-    }
-
-    .hero {
-        padding: 25px 0;
-    }
-
-    .hero h1 {
-        letter-spacing: -1px;
-    }
-
-    .files-card {
-        margin-top: 16px;
-    }
+.dark {
+ --ink:#f4f4f5;
+ --muted:#b7bbc5;
+ --card:#19191f;
+ --line:#383039;
+ background:#101014;
+ color:var(--ink);
 }
 
-@media (max-width: 430px) {
-    .nav-inner {
-        padding: 14px;
-    }
+.dark .topbar {background:#15151bee}
+.dark .stat,.dark .panel,.dark .quick {background:#19191f}
+.dark .searchrow input,.dark .searchrow select,
+.dark .smallbtn,.dark .uploadbox {
+ background:#202027;
+ color:#eee;
+ border-color:#383039;
+}
 
-    .brand {
-        font-size: 19px;
-    }
+@media(max-width:900px) {
+ .welcome,.main-grid {grid-template-columns:1fr}
+ .stats {grid-template-columns:repeat(2,1fr)}
+ .quickgrid {grid-template-columns:repeat(2,1fr)}
+}
 
-    .file {
-        align-items: flex-start;
-        flex-direction: column;
-    }
-
-    .file-actions {
-        width: 100%;
-        flex-wrap: wrap;
-    }
+@media(max-width:520px) {
+ .topbar {align-items:flex-start;flex-direction:column}
+ .nav {width:100%;gap:3px}
+ .nav a,.nav button {padding:8px}
+ .stats {gap:8px}
+ .stat {padding:12px}
+ .panel {padding:15px}
+ .file {align-items:flex-start;flex-wrap:wrap}
+ .fileactions {margin-left:52px}
+ .quickgrid {gap:9px}
+ .quick {padding:13px}
+ .footer {justify-content:center;text-align:center}
 }
 </style>
 </head>
 
-<body>
-<header class="navbar">
-    <nav class="nav-inner">
-        <a href="/" class="brand">
-            <span class="brand-icon">H</span>
-            <span>HarshShare</span>
-        </a>
+<body id="top">
 
-        {% if admin %}
-            <a class="nav-link" href="{{ url_for('logout') }}">Admin Logout ↗</a>
-        {% else %}
-            <a class="nav-link" href="{{ url_for('login') }}">Admin Login ↗</a>
-        {% endif %}
-    </nav>
+<header class="topbar">
+ <a class="brand" href="{{ url_for('home') }}">Tr!<span>5</span>h@</a>
+ <nav class="nav">
+  <a href="{{ url_for('home') }}">⌂ Home</a>
+  <a href="#files">▣ Files</a>
+  <a href="{{ url_for('boxing_game') }}">🎮 Game</a>
+  <a href="#tools">✦ Tools</a>
+  <a href="{{ url_for('login') if not admin else url_for('logout') }}" class="login">
+   {{ 'Admin Login' if not admin else 'Logout' }}
+  </a>
+  <button type="button" id="themeBtn">☼ Theme</button>
+ </nav>
 </header>
 
-<main class="container">
+<div class="wrap">
 
-    <section class="hero">
-        <span class="badge">SIMPLE · FAST · YOURS</span>
-        <h1>Share files. <span>Play more.</span></h1>
-        <p>Your personal space to access shared files and enjoy your gaming zone.</p>
-    </section>
+{% with messages = get_flashed_messages() %}
+{% for msg in messages %}
+<div class="notice">{{ msg }}</div>
+{% endfor %}
+{% endwith %}
 
-    {% with messages = get_flashed_messages() %}
-        {% for message in messages %}
-            <div class="notice">{{ message }}</div>
-        {% endfor %}
-    {% endwith %}
+{% if message %}
+<div class="notice">{{ message }}</div>
+{% endif %}
 
-    {% if message %}
-        <div class="notice">{{ message }}</div>
-    {% endif %}
+<section class="welcome">
+ <div class="intro">
+  <div class="eyebrow">SHARE · PLAY · GROW</div>
+  <h1>Your files.<br>Your <span>space.</span></h1>
+  <p>Welcome to Tr!5h@ — upload, find and download files, and take a break in the game zone.</p>
+  <div class="pills">
+   <span class="pill">🔒 Protected uploads</span>
+   <span class="pill">⚡ Quick file access</span>
+   <span class="pill">☁️ Cloud storage</span>
+  </div>
+ </div>
 
-    <section class="grid">
+ <div class="arena">
+  <div>YOUR BREAK TIME</div>
+  <h2>Game Zone</h2>
+  <p>Take a break and jump into the arena.</p>
+  <a class="btn" href="{{ url_for('boxing_game') }}">🎮 PLAY GAME ➜</a>
+ </div>
+</section>
 
-        <div class="card">
-            <div class="card-heading">
-                <div class="icon">📁</div>
-                <div>
-                    <h2>File Sharing</h2>
-                    <p class="subtitle">Your files, all in one place.</p>
-                </div>
-            </div>
+<section class="stats">
+ <div class="stat"><span class="icon">📁</span><strong>{{ files|length }}</strong><small>Available files</small></div>
+ <div class="stat"><span class="icon">☁️</span><strong>Cloud</strong><small>File storage</small></div>
+ <div class="stat"><span class="icon">🛡️</span><strong>{{ 'Admin' if admin else 'Visitor' }}</strong><small>Current access</small></div>
+ <div class="stat"><span class="icon">🎮</span><strong>Game</strong><small>Ready to play</small></div>
+</section>
 
-            {% if admin %}
-                <div class="upload-box">
-                    <p class="subtitle" style="margin-bottom:15px">
-                        Upload a file to your cloud storage.
-                    </p>
+<section class="main-grid">
 
-                    <form action="{{ url_for('upload') }}"
-                          method="post"
-                          enctype="multipart/form-data">
-                        <input type="file" name="file" required>
-                        <button type="submit">↑ Upload File</button>
-                    </form>
-                </div>
-            {% else %}
-                <p class="subtitle">
-                    Browse available files below and download the files you need.
-                    Admin access is required to upload or delete files.
-                </p>
+<div class="panel" id="files">
+ <h2>📤 File Manager</h2>
+ <div class="muted">Upload and manage files from one place.</div>
 
-                <a class="btn outline-btn"
-                   href="{{ url_for('login') }}"
-                   style="margin-top:17px">
-                    Admin Login
-                </a>
-            {% endif %}
-        </div>
+ {% if admin %}
+ <form class="uploadbox" action="{{ url_for('upload') }}" method="post" enctype="multipart/form-data">
+  <strong>Upload a new file</strong>
+  <p class="muted">Maximum file size: 100 MB</p>
+  <input type="file" name="file" required>
+  <br><button class="btn" type="submit">⬆ Upload File</button>
+ </form>
+ {% else %}
+ <div class="uploadbox">
+  <strong>Want to upload files?</strong>
+  <p class="muted">Admin login is required to upload or delete files.</p>
+  <a class="btn" href="{{ url_for('login') }}">🔑 Admin Login</a>
+ </div>
+ {% endif %}
 
-        <div class="card game-card">
-            <div class="card-heading">
-                <div class="icon">🎮</div>
-                <div>
-                    <h2>Gaming Zone</h2>
-                    <p class="subtitle">Take a break. Test your skills.</p>
-                </div>
-            </div>
+ <div class="searchrow">
+  <input id="fileSearch" type="search" placeholder="🔍 Search files...">
+  <select id="fileCategory">
+   <option value="all">All types</option>
+   <option value="image">Images</option>
+   <option value="video">Videos</option>
+   <option value="document">Documents</option>
+   <option value="other">Others</option>
+  </select>
+ </div>
 
-            <div class="game-tag">⚡ READY TO PLAY</div>
+ <div class="filelist" id="fileList">
+ {% for item in files %}
+ {% set ext = item.name.rsplit('.', 1)[-1].lower() if '.' in item.name else '' %}
+ {% set kind = 'image' if ext in ['jpg','jpeg','png','gif','webp','svg','bmp'] else 'video' if ext in ['mp4','mov','avi','mkv','webm'] else 'document' if ext in ['pdf','doc','docx','txt','xls','xlsx','ppt','pptx','csv'] else 'other' %}
+ <div class="file" data-name="{{ item.name|lower }}" data-kind="{{ kind }}">
+  <div class="fileicon">{{ '🖼️' if kind == 'image' else '🎬' if kind == 'video' else '📄' if kind == 'document' else '📦' }}</div>
+  <div><div class="filename">{{ item.name }}</div><div class="filemeta">{{ kind|title }}</div></div>
+  <div class="fileactions">
+   <a class="smallbtn" href="{{ url_for('download', file_id=item.id) }}">Download</a>
+   {% if admin %}
+   <form class="delete-form" action="{{ url_for('delete', file_id=item.id) }}" method="post" onsubmit="return confirm('Delete this file?')">
+    <button class="smallbtn" type="submit">Delete</button>
+   </form>
+   {% endif %}
+  </div>
+ </div>
+ {% endfor %}
+ </div>
+ <div class="empty" id="noMatches" {% if files %}hidden{% endif %}>No files found.</div>
+</div>
 
-            <p class="subtitle" style="margin-bottom:22px">
-                Enter the arena and play your boxing game.
-            </p>
+<div class="panel" id="tools">
+ <h2>✨ Quick Access</h2>
+ <p class="muted">Jump straight to the section you need.</p>
+ <div class="quickgrid" style="grid-template-columns:repeat(2,1fr);margin-top:15px">
+  <a class="quick" href="#files"><div class="qicon">🔎</div><strong>Find Files</strong><small>Search uploaded files</small></a>
+  <a class="quick" href="{{ url_for('boxing_game') }}"><div class="qicon">🎮</div><strong>Game</strong><small>Open the game zone</small></a>
+  <a class="quick" href="{{ url_for('login') if not admin else url_for('logout') }}"><div class="qicon">👤</div><strong>{{ 'Admin Access' if not admin else 'Sign Out' }}</strong><small>Manage file access</small></a>
+  <a class="quick" href="#top"><div class="qicon">⬆️</div><strong>Back to Top</strong><small>Return to homepage</small></a>
+ </div>
+ <div class="uploadbox">
+  <strong>💡 Quick tip</strong>
+  <p class="muted">Search by file name or filter by type.</p>
+ </div>
+</div>
+</section>
 
-            <a class="btn" href="{{ url_for('boxing_game') }}">
-                ▶ Play Now
-            </a>
-        </div>
+<section class="section-title">
+ <div><h2>Explore Tr!5h@</h2><p class="muted">Your files and game in one place.</p></div>
+</section>
 
-    </section>
+<section class="quickgrid">
+ <a class="quick" href="#files"><div class="qicon">📚</div><strong>Browse Files</strong><small>See available uploads</small></a>
+ <a class="quick" href="#fileSearch"><div class="qicon">🔍</div><strong>Search</strong><small>Find a file quickly</small></a>
+ <a class="quick" href="{{ url_for('boxing_game') }}"><div class="qicon">🕹️</div><strong>Game</strong><small>Open the game zone</small></a>
+ <a class="quick" href="{{ url_for('login') if not admin else url_for('logout') }}"><div class="qicon">⚙️</div><strong>Admin Panel</strong><small>Manage site access</small></a>
+</section>
+</div>
 
-    <section class="card files-card">
-        <div class="files-heading">
-            <h2>Available Files</h2>
-            <span class="file-count">{{ files|length }} file(s)</span>
-        </div>
+<footer class="footer">
+ <div><div class="brand">Tr!<span>5</span>h@</div><small>Share · Play · Grow</small></div>
+ <div>Made bye Harsh Sharma</div>
+ <small>Tr!5h@ · File Sharing + Game</small>
+</footer>
 
-        {% for item in files %}
-            <div class="file">
-                <div class="file-name">📄 {{ item.name }}</div>
+<script>
+const search = document.getElementById('fileSearch');
+const category = document.getElementById('fileCategory');
 
-                <div class="file-actions">
-                    <a class="btn"
-                       href="{{ url_for('download', file_id=item.id) }}">
-                        ↓ Download
-                    </a>
+function filterFiles() {
+ const q = (search.value || '').toLowerCase().trim();
+ const kind = category.value;
+ let visible = 0;
 
-                    {% if admin %}
-                        <form class="delete-form"
-                              action="{{ url_for('delete', file_id=item.id) }}"
-                              method="post"
-                              onsubmit="return confirm('Delete this file?');">
-                            <button type="submit">Delete</button>
-                        </form>
-                    {% endif %}
-                </div>
-            </div>
-        {% else %}
-            <div class="empty">No files found yet.</div>
-        {% endfor %}
-    </section>
+ document.querySelectorAll('#fileList .file').forEach(row => {
+  const okName = (row.dataset.name || '').includes(q);
+  const okKind = kind === 'all' || row.dataset.kind === kind;
+  row.hidden = !(okName && okKind);
+  if (!row.hidden) visible++;
+ });
 
-    <footer class="footer">
-        HarshShare · Share responsibly
-    </footer>
+ document.getElementById('noMatches').hidden = visible !== 0;
+}
+
+search.addEventListener('input', filterFiles);
+category.addEventListener('change', filterFiles);
+
+document.getElementById('themeBtn').addEventListener('click', () => {
+ document.body.classList.toggle('dark');
+ try {
+  localStorage.setItem('trisha-dark', document.body.classList.contains('dark') ? '1' : '0');
+ } catch(e) {}
+});
+
+try {
+ if (localStorage.getItem('trisha-dark') === '1') {
+  document.body.classList.add('dark');
+ }
+} catch(e) {}
+</script>
+</body>
+</html>
+"""
+
+LOGIN_PAGE = """
+<!doctype html>
+<html lang="en">
+<head>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tr!5h@ Admin Login</title>
+<style>
+body{font-family:Arial,sans-serif;background:#fff7f8;margin:0;min-height:100vh;display:grid;place-items:center;color:#20232a}
+.card{background:white;border:1px solid #f1d5d8;border-radius:18px;padding:28px;width:min(90%,400px);box-shadow:0 10px 30px #8f061018}
+h1{color:#c1121f;margin-top:0}
+input{width:100%;padding:12px;border:1px solid #e5bfc3;border-radius:9px;margin:10px 0 16px;box-sizing:border-box}
+button{background:#c1121f;color:white;border:0;border-radius:9px;padding:12px 18px;font-weight:bold;cursor:pointer}
+a{color:#c1121f;text-decoration:none}
+</style>
+</head>
+<body>
+<main class="card">
+<h1>Tr!5h@ Admin</h1>
+<p>Sign in to upload and manage cloud files.</p>
+<form method="post">
+<input type="password" name="password" placeholder="Admin password" required autofocus>
+<button type="submit">Login</button>
+</form>
+<p><a href="/">← Back to Home</a></p>
 </main>
 </body>
 </html>
 """
 
-
-LOGIN_PAGE = """
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>HarshShare Admin Login</title>
-<style>
-* { box-sizing: border-box; }
-body {
-    margin: 0;
-    min-height: 100vh;
-    display: grid;
-    place-items: center;
-    padding: 18px;
-    background: #fffafa;
-    color: #241c1d;
-    font-family: Arial, sans-serif;
-}
-.card {
-    width: 100%;
-    max-width: 420px;
-    padding: 28px;
-    background: white;
-    border: 1px solid #f0dadd;
-    border-radius: 20px;
-    box-shadow: 0 10px 30px rgba(100,0,15,.06);
-}
-.mark {
-    display: grid;
-    place-items: center;
-    width: 46px;
-    height: 46px;
-    border-radius: 14px;
-    color: white;
-    background: #c1121f;
-    font-size: 22px;
-    font-weight: bold;
-}
-h1 { font-size: 25px; margin: 18px 0 8px; }
-p { color: #74696a; line-height: 1.6; font-size: 14px; }
-label { display: block; margin: 20px 0 8px; font-size: 13px; font-weight: bold; }
-input {
-    width: 100%;
-    padding: 12px;
-    border: 1px solid #e5bfc3;
-    border-radius: 10px;
-}
-button {
-    width: 100%;
-    margin-top: 14px;
-    padding: 12px;
-    color: white;
-    background: #c1121f;
-    border: 0;
-    border-radius: 10px;
-    font-weight: bold;
-    cursor: pointer;
-}
-button:hover { background: #920d17; }
-a { color: #c1121f; text-decoration: none; font-weight: bold; }
-</style>
-</head>
-<body>
-<div class="card">
-    <div class="mark">H</div>
-    <h1>Admin Login</h1>
-    <p>Sign in to manage your HarshShare files.</p>
-
-    <form method="post">
-        <label for="password">Admin password</label>
-        <input id="password" type="password"
-               name="password"
-               placeholder="Enter admin password"
-               required>
-        <button type="submit">Login</button>
-    </form>
-
-    <p><a href="/">← Back to HarshShare</a></p>
-</div>
-</body>
-</html>
-"""
-
-
-# =========================
-# EXISTING CLOUD FUNCTIONS
-# =========================
 
 def _to_dict(obj):
     if isinstance(obj, dict):
@@ -637,23 +642,191 @@ def _to_dict(obj):
 
 def _field(obj, *names, default=None):
     data = _to_dict(obj)
-
     for name in names:
         if name in data and data[name] is not None:
             return data[name]
-
         camel = name.split("_")[0] + "".join(
             part.title() for part in name.split("_")[1:]
         )
-
         if camel in data and data[camel] is not None:
             return data[camel]
-
         if hasattr(obj, name):
             value = getattr(obj, name)
             if value is not None:
                 return value
+    return default
 
+
+def _require_cloud():
+    if not imagekit or not IMAGEKIT_PRIVATE_KEY or not IMAGEKIT_URL_ENDPOINT:
+        abort(503, description="Render Environment Variables check karein.")
+
+
+def _list_cloud_files():
+    _require_cloud()
+    response = imagekit.assets.list(path=IMAGEKIT_FOLDER, limit=100)
+    data = _to_dict(response)
+    assets = data.get("assets") or data.get("files") or data.get("results")
+
+    if assets is None and isinstance(response, list):
+        assets = response
+    if assets is None:
+        assets = getattr(response, "assets", None) or getattr(response, "files", None) or []
+
+    result = []
+    for asset in assets:
+        file_id = _field(asset, "file_id", "id")
+        name = _field(asset, "name", "file_name", "filename", default="Unnamed file")
+        url = _field(asset, "url", "file_url")
+
+        if file_id and name:
+            result.append({
+                "id": str(file_id),
+                "name": str(name),
+                "url": url or ""
+            })
+
+    return sorted(result, key=lambda item: item["name"].lower())
+
+
+@app.route("/")
+def home():
+    try:
+        files = _list_cloud_files()
+        message = ""
+    except Exception:
+        logger.exception("Could not list ImageKit files")
+        files = []
+        message = "Cloud files load nahi ho paayi. ImageKit credentials ya SDK logs check karein."
+
+    return render_template_string(
+        PAGE,
+        files=files,
+        admin=session.get("admin", False),
+        message=message
+    )
+
+
+@app.route("/game")
+def boxing_game():
+    return render_template("game.html")
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if not ADMIN_PASSWORD or not app.secret_key:
+        return "Render Environment mein HARSHSHARE_ADMIN_PASSWORD aur HARSHSHARE_SECRET_KEY set karein.", 503
+
+    if request.method == "POST":
+        password = request.form.get("password", "")
+        if hmac.compare_digest(password, ADMIN_PASSWORD):
+            session["admin"] = True
+            return redirect(url_for("home"))
+
+        return "Password galat hai. <a href='/login'>Dobara try karein</a>", 401
+
+    return LOGIN_PAGE
+
+
+@app.route("/upload", methods=["POST"])
+def upload():
+    if not session.get("admin"):
+        abort(403)
+
+    _require_cloud()
+    uploaded = request.files.get("file")
+
+    if not uploaded or not uploaded.filename:
+        abort(400, description="File select karein.")
+
+    filename = secure_filename(uploaded.filename)
+    if not filename or filename in {".", ".."}:
+        abort(400, description="Invalid filename.")
+
+    try:
+        file_bytes = uploaded.read()
+        response = imagekit.files.upload(
+            file=file_bytes,
+            file_name=filename,
+            folder=IMAGEKIT_FOLDER,
+            use_unique_file_name=True,
+        )
+
+        uploaded_id = _field(response, "file_id", "id")
+        if not uploaded_id:
+            logger.error("ImageKit upload response incomplete: %s", _to_dict(response))
+            abort(502, description="ImageKit upload response incomplete.")
+
+        flash("File cloud par upload ho gayi.")
+
+    except Exception:
+        logger.exception("ImageKit upload failed")
+        abort(502, description="Upload fail ho gaya. Render logs check karein.")
+
+    return redirect(url_for("home"))
+
+
+@app.route("/download/<path:file_id>")
+def download(file_id):
+    _require_cloud()
+
+    try:
+        files = _list_cloud_files()
+        asset = next((item for item in files if item["id"] == file_id), None)
+
+        if not asset:
+            abort(404)
+
+        if not asset["url"]:
+            abort(404, description="File URL nahi mili.")
+
+        return redirect(asset["url"])
+
+    except Exception:
+        logger.exception("ImageKit download lookup failed")
+        abort(502, description="File locate nahi ho paayi.")
+
+
+@app.route("/delete/<path:file_id>", methods=["POST"])
+def delete(file_id):
+    if not session.get("admin"):
+        abort(403)
+
+    _require_cloud()
+
+    try:
+        files = _list_cloud_files()
+        asset = next((item for item in files if item["id"] == file_id), None)
+
+        if not asset:
+            abort(404)
+
+        imagekit.files.delete(file_id)
+        def _to_dict(obj):
+    """Convert SDK objects to dictionaries."""
+    if isinstance(obj, dict):
+        return obj
+    if hasattr(obj, "model_dump"):
+        return obj.model_dump(by_alias=False)
+    if hasattr(obj, "dict"):
+        return obj.dict()
+    return {}
+
+
+def _field(obj, *names, default=None):
+    data = _to_dict(obj)
+    for name in names:
+        if name in data and data[name] is not None:
+            return data[name]
+        camel = name.split("_")[0] + "".join(
+            part.title() for part in name.split("_")[1:]
+        )
+        if camel in data and data[camel] is not None:
+            return data[camel]
+        if hasattr(obj, name):
+            value = getattr(obj, name)
+            if value is not None:
+                return value
     return default
 
 
@@ -666,17 +839,14 @@ def _require_cloud():
 
 
 def _list_cloud_files():
-    """Fetch files from the existing HarshShare ImageKit folder."""
+    """Fetch files from the HarshShare folder in ImageKit."""
     _require_cloud()
-
     response = imagekit.assets.list(path=IMAGEKIT_FOLDER, limit=100)
     data = _to_dict(response)
 
     assets = data.get("assets") or data.get("files") or data.get("results")
-
     if assets is None and isinstance(response, list):
         assets = response
-
     if assets is None:
         assets = (
             getattr(response, "assets", None)
@@ -685,7 +855,6 @@ def _list_cloud_files():
         )
 
     result = []
-
     for asset in assets:
         file_id = _field(asset, "file_id", "id")
         name = _field(
@@ -727,7 +896,7 @@ def home():
 
 @app.route("/game")
 def boxing_game():
-    # Existing game template is preserved.
+    # Existing game page ko preserve karega.
     return render_template("game.html")
 
 
@@ -749,7 +918,7 @@ def login():
 
         return "Password galat hai. <a href='/login'>Dobara try karein</a>", 401
 
-    return render_template_string(LOGIN_PAGE)
+    return LOGIN_PAGE
 
 
 @app.route("/upload", methods=["POST"])
@@ -760,12 +929,10 @@ def upload():
     _require_cloud()
 
     uploaded = request.files.get("file")
-
     if not uploaded or not uploaded.filename:
         abort(400, description="File select karein.")
 
     filename = secure_filename(uploaded.filename)
-
     if not filename or filename in {".", ".."}:
         abort(400, description="Invalid filename.")
 
@@ -780,10 +947,9 @@ def upload():
         )
 
         uploaded_id = _field(response, "file_id", "id")
-
         if not uploaded_id:
             logger.error(
-                "ImageKit upload response did not contain file_id: %s",
+                "ImageKit upload response incomplete: %s",
                 _to_dict(response)
             )
             abort(502, description="ImageKit upload response incomplete.")
