@@ -1000,21 +1000,24 @@ def delete(file_id):
     try:
         files = _list_cloud_files()
         asset = next(
-            (item for item in files if item["id"] == file_id),
+            (item for item in files if str(item.get("id")) == str(file_id)),
             None
         )
 
         if not asset:
-            abort(404)
+            abort(404, description="ImageKit mein file ID nahi mili.")
 
         imagekit.files.delete(file_id)
         flash("File cloud se delete kar di gayi.")
 
-    except Exception:
+    except Exception as error:
+        if getattr(error, "code", None) == 404:
+            abort(404, description="ImageKit mein file nahi mili.")
+
         logger.exception("ImageKit delete failed")
         abort(
             502,
-            description="Delete fail ho gaya. ImageKit dashboard aur Render logs check karein."
+            description="Delete fail ho gaya. Render logs check karein."
         )
 
     return redirect(url_for("home"))
